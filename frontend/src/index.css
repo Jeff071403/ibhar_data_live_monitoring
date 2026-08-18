@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-white text-slate-900 transition-colors duration-300;
+  }
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.4);
+  border-radius: 9999px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(37, 99, 235, 0.7);
+}
+
+/* Glass & Soft Card Background Utilities */
+.card-warm-peach {
+  background-color: #FFFFFF;
+  border-left: 4px solid #EA580C;
+}
+.dark .card-warm-peach {
+  background-color: #1E293B;
+  border-left: 4px solid #FB923C;
+}
+
+.card-warm-lavender {
+  background-color: #FFFFFF;
+  border-left: 4px solid #7C3AED;
+}
+.dark .card-warm-lavender {
+  background-color: #1E293B;
+  border-left: 4px solid #A78BFA;
+}
+
+.card-warm-sage {
+  background-color: #FFFFFF;
+  border-left: 4px solid #059669;
+}
+.dark .card-warm-sage {
+  background-color: #1E293B;
+  border-left: 4px solid #34D399;
+}
+
+.card-warm-blue {
+  background-color: #FFFFFF;
+  border-left: 4px solid #2563EB;
+}
+.dark .card-warm-blue {
+  background-color: #1E293B;
+  border-left: 4px solid #60A5FA;
+}
+
+.card-warm-yellow {
+  background-color: #FFFFFF;
+  border-left: 4px solid #D97706;
+}
+.dark .card-warm-yellow {
+  background-color: #1E293B;
+  border-left: 4px solid #FBBF24;
+}
+
+/* Pulse animation helper */
+@keyframes softPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.15);
+  }
+}
+
+.animate-pulse-dot {
+  animation: softPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Hide scrollbar utility */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
