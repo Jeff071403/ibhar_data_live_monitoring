@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Card, type CardVariant } from '../common/Card';
 import { Badge } from '../common/Badge';
 import { CopyButton } from '../common/CopyButton';
-import type { Hospital } from '../../data/mockHospitals';
+import type { Hospital } from '../../types';
 import { formatVolume } from '../../utils/formatters';
 import { Clock, HardDrive, Activity, AlertTriangle, ArrowUpRight } from 'lucide-react';
 

@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useMonitoring } from '../../hooks/useMonitoring';
-import type { Hospital } from '../../data/mockHospitals';
+import type { Hospital } from '../../types';
 import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { CopyButton } from '../../components/common/CopyButton';
@@ -157,7 +157,7 @@ export const HospitalComparisonPage: React.FC = () => {
 
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-nude-card dark:bg-night-card border border-[#EFE4DC] dark:border-[#102437] text-xs font-mono">
             <GitCompare className="w-4 h-4 text-lightAccent-peach dark:text-nightAccent-peach" />
-            <span>Comparing: <strong>90 Nodes</strong></span>
+            <span>Comparing: <strong>{hospitals.length} Nodes</strong></span>
           </div>
         </div>
       </div>

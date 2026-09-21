@@ -20,6 +20,14 @@ export const LiveVolumeChart: React.FC = () => {
   const gridColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)';
   const textColor = isDark ? '#CBD5E1' : '#334155';
 
+  if (!timeSeries || timeSeries.length === 0) {
+    return (
+      <div className="w-full h-64 flex items-center justify-center text-xs text-slate-500 font-bold border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
+        Waiting for live telemetry ingestion data...
+      </div>
+    );
+  }
+
   return (
     <div className="w-full h-64">
       <ResponsiveContainer width="100%" height="100%">

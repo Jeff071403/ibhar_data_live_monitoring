@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Card } from '../common/Card';
 import { Badge } from '../common/Badge';
 import { CopyButton } from '../common/CopyButton';
-import type { Alert } from '../../data/mockAlerts';
+import type { Alert } from '../../types';
 import { Clock, ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react';
 
 interface AlertCardProps {

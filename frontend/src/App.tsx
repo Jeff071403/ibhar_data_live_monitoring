@@ -15,8 +15,8 @@ import { AlertsPage } from './pages/Alerts/AlertsPage';
 import { AnalyticsPage } from './pages/Analytics/AnalyticsPage';
 import { HospitalComparisonPage } from './pages/HospitalComparison/HospitalComparisonPage';
 import { ReportsPage } from './pages/Reports/ReportsPage';
+import { IntegrationHealthPage } from './pages/IntegrationHealth/IntegrationHealthPage';
 import { NotificationsPage } from './pages/Notifications/NotificationsPage';
-import { SimulationLabPage } from './pages/SimulationLab/SimulationLabPage';
 import { MorePage } from './pages/More/MorePage';
 import { ProfilePage } from './pages/Profile/ProfilePage';
 import { UserManagementPage } from './pages/UserManagement/UserManagementPage';
@@ -41,10 +41,10 @@ export const App: React.FC = () => {
               <Route path="hospitals/:id" element={<HospitalDetailsPage />} />
               <Route path="alerts" element={<AlertsPage />} />
               <Route path="analytics" element={<AnalyticsPage />} />
+              <Route path="integration-health" element={<IntegrationHealthPage />} />
               <Route path="comparison" element={<HospitalComparisonPage />} />
               <Route path="reports" element={<ReportsPage />} />
               <Route path="notifications" element={<NotificationsPage />} />
-              <Route path="simulation-lab" element={<SimulationLabPage />} />
               <Route path="more" element={<MorePage />} />
               <Route path="profile" element={<ProfilePage />} />
               <Route path="user-management" element={<UserManagementPage />} />

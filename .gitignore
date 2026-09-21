@@ -8,6 +8,7 @@ frontend/dist-ssr/
 frontend/*.local
 
 # Python/Django
+backend/venv/
 backend/.venv/
 backend/__pycache__/
 backend/*.pyc

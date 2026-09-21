@@ -18,7 +18,7 @@ import {
   ShieldCheck,
   FileSpreadsheet
 } from 'lucide-react';
-import type { Hospital } from '../../data/mockHospitals';
+import type { Hospital } from '../../types';
 
 interface ExcelRow {
   id?: string;

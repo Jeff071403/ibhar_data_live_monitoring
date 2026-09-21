@@ -1,4 +1,4 @@
-import type { Hospital } from '../data/mockHospitals';
+import type { Hospital } from '../types';
 
 export interface MonitoringThresholds {
   healthyMaxMinutes: number; // 0-30 min

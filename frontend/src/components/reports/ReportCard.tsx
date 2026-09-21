@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import type { ReportItem } from '../../data/mockReports';
-import { FileText, Clock, HardDrive, Activity, DollarSign, Download, Check } from 'lucide-react';
+import type { ReportItem } from '../../types';
+import { FileText, Clock, HardDrive, Activity, DollarSign, Download, Eye, Check } from 'lucide-react';
 
 interface ReportCardProps {
   report: ReportItem;
+  onPreview: (report: ReportItem) => void;
+  onDownload: (report: ReportItem, format: 'pdf' | 'excel' | 'csv') => void;
 }
 
-export const ReportCard: React.FC<ReportCardProps> = ({ report }) => {
+export const ReportCard: React.FC<ReportCardProps> = ({ report, onPreview, onDownload }) => {
   const [downloadingFormat, setDownloadingFormat] = useState<string | null>(null);
 
   const getWhiteIcon = () => {
@@ -22,18 +24,12 @@ export const ReportCard: React.FC<ReportCardProps> = ({ report }) => {
     }
   };
 
-  const handleDownload = (format: string) => {
+  const handleFormatDownload = (format: 'pdf' | 'excel' | 'csv') => {
     setDownloadingFormat(format);
+    onDownload(report, format);
     setTimeout(() => {
       setDownloadingFormat(null);
-      const element = document.createElement('a');
-      const file = new Blob([`IBHAR Telemetry Report: ${report.title}\nGenerated: ${new Date().toISOString()}\nFormat: ${format}\nRecord Count: ${report.recordCount}`], { type: 'text/plain' });
-      element.href = URL.createObjectURL(file);
-      element.download = `${report.title.replace(/\s+/g, '_')}_${format.toLowerCase()}.${format.toLowerCase() === 'excel' ? 'xlsx' : format.toLowerCase()}`;
-      document.body.appendChild(element);
-      element.click();
-      document.body.removeChild(element);
-    }, 1200);
+    }, 1000);
   };
 
   const getThemeDetails = (iconName: string) => {
@@ -48,15 +44,15 @@ export const ReportCard: React.FC<ReportCardProps> = ({ report }) => {
           color: '#ea580c', // orange-600
           gradient: 'linear-gradient(135deg, #ea580c 0%, #d97706 100%)',
         };
-      case 'Activity': // Sync Frequency
+      case 'Activity': // Sync Frequency & Errors
         return {
           color: '#10b981', // emerald-500
           gradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
         };
       case 'DollarSign': // AWS Cost
         return {
-          color: '#f59e0b', // amber-500
-          gradient: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+          color: '#64748b', // slate-500
+          gradient: 'linear-gradient(135deg, #64748b 0%, #475569 100%)',
         };
       case 'FileText': // Data Summary
       default:
@@ -67,7 +63,7 @@ export const ReportCard: React.FC<ReportCardProps> = ({ report }) => {
     }
   };
 
-  const theme = getThemeDetails(report.iconName);
+  const theme = getThemeDetails(report.iconName || 'FileText');
 
   return (
     <motion.div
@@ -91,7 +87,7 @@ export const ReportCard: React.FC<ReportCardProps> = ({ report }) => {
         className="w-full h-[52px] relative z-0"
         style={{ backgroundColor: theme.color }}
       >
-        {/* Document Sticking Out (The white sheet of paper) */}
+        {/* Document Sticking Out */}
         <div
           className="absolute left-3.5 right-3.5 bg-white rounded-xl shadow-sm px-3 py-1.5 z-10 flex items-center justify-between border border-slate-200"
           style={{ height: '56px', top: '8px' }}
@@ -115,8 +111,8 @@ export const ReportCard: React.FC<ReportCardProps> = ({ report }) => {
         className="relative z-20 w-full rounded-b-3xl rounded-t-none p-4 shadow-xl text-white flex flex-col justify-between animate-fade-in-up"
         style={{
           background: theme.gradient,
-          marginTop: '0px', // pushes it down to reveal the document
-          height: '240px',
+          marginTop: '0px',
+          height: '250px',
           border: '1px solid rgba(255, 255, 255, 0.15)',
         }}
       >
@@ -130,7 +126,7 @@ export const ReportCard: React.FC<ReportCardProps> = ({ report }) => {
               {report.title}
             </h4>
             <p className="text-[9px] text-white/80 font-sans mt-0.5">
-              {report.recordCount} hospital records
+              {report.recordCount !== undefined ? `${report.recordCount} matching database records` : 'Real DB data'}
             </p>
           </div>
           <div className="p-2 rounded-xl bg-white/10 border border-white/20 shrink-0">
@@ -139,32 +135,38 @@ export const ReportCard: React.FC<ReportCardProps> = ({ report }) => {
         </div>
 
         {/* Description */}
-        <p className="relative z-10 text-[11px] leading-relaxed text-white/90 font-sans flex-1 mt-3 mb-4 overflow-hidden">
+        <p className="relative z-10 text-[11px] leading-relaxed text-white/90 font-sans flex-1 mt-2 mb-3 overflow-hidden">
           {report.description}
         </p>
 
-        {/* Export Format Buttons */}
-        <div className="relative z-10 pt-3 border-t border-white/15">
-          <span className="text-[9px] font-cute uppercase font-bold text-white/70 block mb-2">
-            Export Format
-          </span>
+        {/* Action Buttons */}
+        <div className="relative z-10 pt-2.5 border-t border-white/15 space-y-2">
+          {/* Primary Action: Generate / Preview */}
+          <button
+            onClick={() => onPreview(report)}
+            className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-xl text-[11px] font-heading font-extrabold bg-white text-slate-900 hover:bg-slate-100 shadow-md cursor-pointer transition-all active:scale-[0.98]"
+          >
+            <Eye className="w-3.5 h-3.5 text-blue-600" />
+            <span>Generate & Preview Report</span>
+          </button>
 
-          <div className="grid grid-cols-3 gap-2">
-            {['PDF', 'Excel', 'CSV'].map((format) => {
-              const isLoading = downloadingFormat === format;
+          {/* Export Quick Download Buttons */}
+          <div className="grid grid-cols-3 gap-1.5">
+            {(['pdf', 'excel', 'csv'] as const).map((fmt) => {
+              const isLoading = downloadingFormat === fmt;
               return (
                 <button
-                  key={format}
-                  onClick={() => handleDownload(format)}
+                  key={fmt}
+                  onClick={() => handleFormatDownload(fmt)}
                   disabled={isLoading}
-                  className="flex items-center justify-center gap-1 py-1.5 rounded-xl text-[10px] font-cute font-extrabold bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all disabled:opacity-50 shadow-sm"
+                  className="flex items-center justify-center gap-1 py-1 rounded-lg text-[9px] font-heading font-extrabold bg-white/10 hover:bg-white/20 text-white border border-white/15 cursor-pointer transition-all disabled:opacity-50"
                 >
                   {isLoading ? (
                     <Check className="w-3 h-3 text-white animate-bounce" />
                   ) : (
                     <Download className="w-3 h-3 opacity-70" />
                   )}
-                  <span>{format}</span>
+                  <span>{fmt.toUpperCase()}</span>
                 </button>
               );
             })}

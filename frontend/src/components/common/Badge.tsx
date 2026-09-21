@@ -1,7 +1,7 @@
 import React from 'react';
 import { getStatusLabel } from '../../utils/monitoring';
 
-export type StatusType = 'healthy' | 'delayed' | 'warning' | 'critical' | 'offline';
+export type StatusType = 'healthy' | 'delayed' | 'warning' | 'critical' | 'offline' | 'unknown';
 
 interface BadgeProps {
   status: StatusType;

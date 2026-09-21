@@ -6,16 +6,27 @@ import { LiveMonitoringCard } from '../../components/cards/LiveMonitoringCard';
 import { RecentAlertsCard } from '../../components/cards/RecentAlertsCard';
 import { MetricMiniCard } from '../../components/cards/MetricMiniCard';
 import { useMonitoring } from '../../hooks/useMonitoring';
-import { Building2, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
+import { Building2, CheckCircle2, Clock, AlertCircle, AlertTriangle, RefreshCw } from 'lucide-react';
 
 export const DashboardPage: React.FC = () => {
-  const { hospitals } = useMonitoring();
+  const {
+    hospitals,
+    dashboardMetrics,
+    isBackendConnected,
+    apiError,
+    manualRefresh,
+    isLoading
+  } = useMonitoring();
   const navigate = useNavigate();
 
-  const totalCount = hospitals.length;
-  const healthyCount = hospitals.filter(h => h.status === 'healthy').length;
-  const delayedCount = hospitals.filter(h => h.status === 'delayed').length;
-  const criticalCount = hospitals.filter(h => h.status === 'critical' || h.status === 'warning' || h.status === 'offline').length;
+  const totalCount = dashboardMetrics?.total_hospitals ?? hospitals.length;
+  const healthyCount = dashboardMetrics?.healthy ?? hospitals.filter(h => h.status === 'healthy').length;
+  const delayedCount = dashboardMetrics?.delayed ?? hospitals.filter(h => h.status === 'delayed').length;
+  const criticalCount = dashboardMetrics?.critical ?? hospitals.filter(h => h.status === 'critical' || h.status === 'warning' || h.status === 'offline').length;
+
+  const totalEncounters = dashboardMetrics?.total_encounters ?? 0;
+  const totalDischarges = dashboardMetrics?.total_discharges ?? 0;
+  const activeAlerts = dashboardMetrics?.active_alerts ?? 0;
 
   return (
     <motion.div
@@ -24,13 +35,34 @@ export const DashboardPage: React.FC = () => {
       transition={{ duration: 0.3 }}
       className="space-y-6"
     >
-      {/* 4 Main Stat Cards with Thick High-Contrast Style */}
+      {/* Backend Disconnected Error Banner */}
+      {!isBackendConnected && (
+        <div className="p-4 rounded-card-lg bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 shrink-0 text-rose-500" />
+            <div>
+              <p className="font-bold text-sm">Unable to load live data</p>
+              <p className="text-xs opacity-90">{apiError || 'Please check backend API connection.'}</p>
+            </div>
+          </div>
+          <button
+            onClick={manualRefresh}
+            disabled={isLoading}
+            className="px-3 py-1.5 rounded-xl bg-rose-500 text-white text-xs font-bold hover:bg-rose-600 transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>Retry Connection</span>
+          </button>
+        </div>
+      )}
+
+      {/* 4 Main Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Total Hospitals"
           value={totalCount}
           icon={<Building2 className="w-5 h-5 text-white stroke-[2.5]" />}
-          trend="+2.1%"
+          trend="Supabase DB"
           isPositive={true}
           variant="blue"
           onClick={() => navigate('/hospitals')}
@@ -39,7 +71,7 @@ export const DashboardPage: React.FC = () => {
           label="Healthy"
           value={healthyCount}
           icon={<CheckCircle2 className="w-5 h-5 text-white stroke-[2.5]" />}
-          trend="+4.2%"
+          trend="Active Feed"
           isPositive={true}
           variant="sage"
           onClick={() => navigate('/hospitals?filter=healthy')}
@@ -48,8 +80,8 @@ export const DashboardPage: React.FC = () => {
           label="Delayed"
           value={delayedCount}
           icon={<Clock className="w-5 h-5 text-white stroke-[2.5]" />}
-          trend="-1.5%"
-          isPositive={true}
+          trend="Needs Sync"
+          isPositive={delayedCount === 0}
           variant="yellow"
           onClick={() => navigate('/hospitals?filter=delayed')}
         />
@@ -57,8 +89,8 @@ export const DashboardPage: React.FC = () => {
           label="Critical / Issues"
           value={criticalCount}
           icon={<AlertCircle className="w-5 h-5 text-white stroke-[2.5]" />}
-          trend="+2 issues"
-          isPositive={false}
+          trend="Incidents"
+          isPositive={criticalCount === 0}
           variant="peach"
           onClick={() => navigate('/hospitals?filter=critical')}
         />
@@ -66,7 +98,7 @@ export const DashboardPage: React.FC = () => {
 
       {/* Main Asymmetrical Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Middle/Left: Live Monitoring Hero Card (Spans 2 columns on desktop) */}
+        {/* Middle/Left: Live Monitoring Hero Card */}
         <div className="lg:col-span-2">
           <LiveMonitoringCard />
         </div>
@@ -77,38 +109,38 @@ export const DashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 4 Mini Metric Cards */}
+      {/* 4 Database-Driven Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricMiniCard
-          title="Data Volume"
-          value="120 MB"
-          subtext="vs yesterday"
-          trend="+8.2%"
+          title="Total Encounters"
+          value={`${totalEncounters}`}
+          subtext="Supabase encounters table"
+          trend="Live DB"
           isPositive={true}
           variant="peach"
-          sparklineData={[88, 92, 104, 115, 128, 140, 120]}
+          sparklineData={[0, Math.min(totalEncounters, 10), totalEncounters]}
           gradientColors={['#F43F5E', '#FDA4AF']}
         />
 
         <MetricMiniCard
-          title="Data Frequency"
-          value="95%"
-          subtext="Exp: 30 min • Avg: 29 min"
-          trend="Optimal"
+          title="Total Discharges"
+          value={`${totalDischarges}`}
+          subtext="Supabase discharges table"
+          trend="Live DB"
           isPositive={true}
           variant="sage"
-          sparklineData={[92, 94, 96, 93, 95, 97, 95]}
+          sparklineData={[0, Math.min(totalDischarges, 10), totalDischarges]}
           gradientColors={['#10B981', '#34D399']}
         />
 
         <MetricMiniCard
-          title="Average Delay"
-          value="25 min"
-          subtext="from yesterday"
-          trend="↓ 8%"
-          isPositive={true}
+          title="Active Alerts"
+          value={`${activeAlerts}`}
+          subtext="Supabase alerts table"
+          trend={activeAlerts === 0 ? 'Clear' : 'Action Required'}
+          isPositive={activeAlerts === 0}
           variant="lavender"
-          sparklineData={[35, 32, 28, 30, 27, 24, 25]}
+          sparklineData={[0, activeAlerts]}
           gradientColors={['#8B5CF6', '#C084FC']}
         />
 
@@ -116,10 +148,10 @@ export const DashboardPage: React.FC = () => {
           title="Hospitals With Issues"
           value={`${criticalCount + delayedCount}`}
           subtext="Delayed or degraded"
-          trend="Needs audit"
-          isPositive={false}
+          trend={criticalCount + delayedCount === 0 ? 'Optimal' : 'Needs audit'}
+          isPositive={criticalCount + delayedCount === 0}
           variant="yellow"
-          sparklineData={[12, 14, 15, 20, 18, 16, 18]}
+          sparklineData={[0, criticalCount + delayedCount]}
           gradientColors={['#F59E0B', '#FBBF24']}
         />
       </div>

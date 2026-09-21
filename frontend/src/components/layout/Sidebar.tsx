@@ -5,12 +5,12 @@ import {
   Building2,
   BellRing,
   BarChart3,
+  HeartPulse,
   GitCompare,
   FileSpreadsheet,
   MoreHorizontal,
   Activity,
-  Sparkles,
-  FlaskConical
+  Sparkles
 } from 'lucide-react';
 import { useMonitoring } from '../../hooks/useMonitoring';
 
@@ -34,9 +34,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isExpanded, setIsExpanded }) =
     { name: 'Hospitals', path: '/hospitals', icon: Building2 },
     { name: 'Alerts', path: '/alerts', icon: BellRing, badge: unreadAlertsCount },
     { name: 'Analytics', path: '/analytics', icon: BarChart3 },
+    { name: 'Integration Health', path: '/integration-health', icon: HeartPulse },
     { name: 'Comparison', path: '/comparison', icon: GitCompare },
     { name: 'Reports', path: '/reports', icon: FileSpreadsheet },
-    { name: 'Simulation Lab', path: '/simulation-lab', icon: FlaskConical },
     { name: 'More & Settings', path: '/more', icon: MoreHorizontal },
   ];
 

@@ -5,7 +5,7 @@ import { RefreshCw } from 'lucide-react';
 import { useMonitoring } from '../../hooks/useMonitoring';
 
 export const LiveMonitoringCard: React.FC = () => {
-  const { lastUpdated, autoRefresh, manualRefresh, isSimulatingUpdate } = useMonitoring();
+  const { hospitals, lastUpdated, autoRefresh, manualRefresh, isSimulatingUpdate } = useMonitoring();
 
   return (
     <Card variant="default" className="relative overflow-hidden flex flex-col justify-between">
@@ -24,7 +24,7 @@ export const LiveMonitoringCard: React.FC = () => {
             </div>
           </div>
           <p className="text-xs text-slate-600 dark:text-slate-400 font-bold">
-            Real-time aggregate payload volume across 90 hospital HL7/FHIR connectors
+            Real-time aggregate payload volume across {hospitals.length} hospital HL7/FHIR connectors
           </p>
         </div>
 
