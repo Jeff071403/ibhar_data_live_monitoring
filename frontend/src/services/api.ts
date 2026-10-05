@@ -11,8 +11,11 @@ import type {
   ReportFilters,
   ReportDetailData,
   DashboardMetrics,
-  HospitalIntegrationTrend
+  HospitalIntegrationTrend,
+  LiveDashboard,
+  LiveHospital
 } from '../types';
+
 
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
@@ -250,12 +253,23 @@ export const apiService = {
     });
   },
 
-  async getIntegrationHealth(filters?: { start_date?: string; end_date?: string; hospital_id?: string; status?: string }): Promise<any> {
+  async getIntegrationHealth(filters?: {
+    start_date?: string;
+    end_date?: string;
+    hospital_id?: string;
+    data_structure?: string;
+    service_name?: string;
+    status?: string;
+    search?: string;
+  }): Promise<any> {
     const params = new URLSearchParams();
     if (filters?.start_date) params.append('start_date', filters.start_date);
     if (filters?.end_date) params.append('end_date', filters.end_date);
     if (filters?.hospital_id && filters.hospital_id !== 'ALL') params.append('hospital_id', filters.hospital_id);
+    if (filters?.data_structure && filters.data_structure !== 'ALL') params.append('data_structure', filters.data_structure);
+    if (filters?.service_name && filters.service_name !== 'ALL') params.append('service_name', filters.service_name);
     if (filters?.status && filters.status !== 'ALL') params.append('status', filters.status);
+    if (filters?.search) params.append('search', filters.search);
 
     const queryStr = params.toString() ? `?${params.toString()}` : '';
     const res = await fetchFromBackend<any>(`/ingestion/health/${queryStr}`);
@@ -319,5 +333,108 @@ export const apiService = {
       return Array.isArray(res) ? res : (res.data || []);
     }
     return [];
+  },
+
+  /**
+   * Live External REST API DataSource: Real-time Data Sync Dashboard
+   */
+  async getLiveDashboard(params?: { days?: number; from_date?: string; to_date?: string }): Promise<LiveDashboard | null> {
+    const query = new URLSearchParams();
+    if (params?.days) query.append('days', String(params.days));
+    if (params?.from_date) query.append('FromDate', params.from_date);
+    if (params?.to_date) query.append('ToDate', params.to_date);
+
+    const queryStr = query.toString() ? `?${query.toString()}` : '';
+    const res = await fetchFromBackend<any>(`/live/dashboard/${queryStr}`);
+    if (res && res.success !== false) {
+      const data = res.data || res;
+      return {
+        hospitals: data.hospitals || [],
+        hospital_count: data.hospital_count ?? (data.hospitals?.length || 0),
+      };
+    }
+    return null;
+  },
+
+  /**
+   * Live External REST API DataSource: Single Hospital Sync Summary
+   */
+  async getLiveHospital(hospitalCode: string, params?: { days?: number; from_date?: string; to_date?: string }): Promise<LiveHospital | null> {
+    const query = new URLSearchParams();
+    if (params?.days) query.append('days', String(params.days));
+    if (params?.from_date) query.append('FromDate', params.from_date);
+    if (params?.to_date) query.append('ToDate', params.to_date);
+
+    const queryStr = query.toString() ? `?${query.toString()}` : '';
+    const res = await fetchFromBackend<any>(`/live/hospitals/${encodeURIComponent(hospitalCode)}/${queryStr}`);
+    if (res && res.success !== false) {
+      return res.data || res;
+    }
+    return null;
+  },
+
+  /**
+   * AWS Cost & Usage Monitoring APIs
+   */
+  async getAwsCostSummary(): Promise<any | null> {
+    try {
+      const rootUrl = API_BASE_URL.replace(/\/api\/?$/, '');
+      const response = await fetch(`${rootUrl}/aws-costs/api/summary/`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } catch (e) {
+      console.warn('[AWS Costs] Summary fetch failed:', e);
+      return null;
+    }
+  },
+
+  async getAwsHourlyCosts(hours = 24): Promise<any | null> {
+    try {
+      const rootUrl = API_BASE_URL.replace(/\/api\/?$/, '');
+      const response = await fetch(`${rootUrl}/aws-costs/api/hourly/?hours=${hours}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } catch (e) {
+      console.warn('[AWS Costs] Hourly fetch failed:', e);
+      return null;
+    }
+  },
+
+  async getAwsDailyCosts(days = 30): Promise<any | null> {
+    try {
+      const rootUrl = API_BASE_URL.replace(/\/api\/?$/, '');
+      const response = await fetch(`${rootUrl}/aws-costs/api/daily/?days=${days}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } catch (e) {
+      console.warn('[AWS Costs] Daily fetch failed:', e);
+      return null;
+    }
+  },
+
+  async getAwsCostByService(days = 7): Promise<any | null> {
+    try {
+      const rootUrl = API_BASE_URL.replace(/\/api\/?$/, '');
+      const response = await fetch(`${rootUrl}/aws-costs/api/by-service/?days=${days}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } catch (e) {
+      console.warn('[AWS Costs] By-service fetch failed:', e);
+      return null;
+    }
+  },
+
+  async getAwsRunningServices(): Promise<any | null> {
+    try {
+      const rootUrl = API_BASE_URL.replace(/\/api\/?$/, '');
+      const response = await fetch(`${rootUrl}/aws-costs/api/running-services/`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } catch (e) {
+      console.warn('[AWS Costs] Running services fetch failed:', e);
+      return null;
+    }
   }
 };
+
+

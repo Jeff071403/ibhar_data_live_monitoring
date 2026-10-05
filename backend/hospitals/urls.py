@@ -25,8 +25,13 @@ from .views import (
     ReportErrorView,
     ReportIntegrationHealthView
 )
+from .live_views import live_dashboard, live_hospital
 
 urlpatterns = [
+    # Live Monitoring APIs (External REST API Data Source)
+    path('live/dashboard/', live_dashboard, name='live-dashboard'),
+    path('live/hospitals/<str:code>/', live_hospital, name='live-hospital'),
+
     # Health Check
     path('health/', HealthCheckView.as_view(), name='health'),
 

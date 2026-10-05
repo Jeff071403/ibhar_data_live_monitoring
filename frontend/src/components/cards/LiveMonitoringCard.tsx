@@ -24,7 +24,7 @@ export const LiveMonitoringCard: React.FC = () => {
             </div>
           </div>
           <p className="text-xs text-slate-600 dark:text-slate-400 font-bold">
-            Real-time aggregate payload volume across {hospitals.length} hospital HL7/FHIR connectors
+            Real-time aggregate payload record count across {hospitals.length} hospital HL7/FHIR connectors
           </p>
         </div>
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Building2, BellRing, FileSpreadsheet, MoreHorizontal } from 'lucide-react';
+import { LayoutDashboard, Building2, BellRing, Settings } from 'lucide-react';
 import { useMonitoring } from '../../hooks/useMonitoring';
 
 export const BottomNav: React.FC = () => {
@@ -10,8 +10,7 @@ export const BottomNav: React.FC = () => {
     { name: 'Home', path: '/', icon: LayoutDashboard },
     { name: 'Hospitals', path: '/hospitals', icon: Building2 },
     { name: 'Alerts', path: '/alerts', icon: BellRing, badge: unreadAlertsCount },
-    { name: 'Reports', path: '/reports', icon: FileSpreadsheet },
-    { name: 'More', path: '/more', icon: MoreHorizontal },
+    { name: 'Settings', path: '/settings', icon: Settings },
   ];
 
   return (

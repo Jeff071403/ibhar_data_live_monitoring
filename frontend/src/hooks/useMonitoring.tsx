@@ -7,11 +7,17 @@ import type {
   Discharge,
   DataIngestionLog,
   DashboardMetrics,
-  IntegrationHealthResponse
+  IntegrationHealthResponse,
+  IntegrationHealthLog,
+  LiveDashboard,
+  LiveHospital
 } from '../types';
 import { apiService } from '../services/api';
+import { computeDelayMinutes, getHospitalLiveStatus, parseDateComponents, getStoredThresholds } from '../utils/monitoring';
 
 export type TimeRange = 'today' | 'yesterday' | '7days' | '30days' | 'custom';
+
+export type DataSourceMode = 'LIVE_API' | 'LOCAL_DB' | 'MOCK';
 
 interface MonitoringContextType {
   hospitals: Hospital[];
@@ -22,6 +28,12 @@ interface MonitoringContextType {
   ingestionLogs: DataIngestionLog[];
   dashboardMetrics: DashboardMetrics | null;
   integrationHealthData: IntegrationHealthResponse | null;
+  
+  // Live REST API Source of Truth (Task 7)
+  liveDashboard: LiveDashboard | null;
+  liveLoading: boolean;
+  liveError: string | null;
+  
   lastUpdated: string;
   autoRefresh: boolean;
   timeRange: TimeRange;
@@ -35,10 +47,88 @@ interface MonitoringContextType {
   getHospitalById: (id: string) => Hospital | undefined;
   unreadAlertsCount: number;
   isSimulatingUpdate: boolean;
+  refreshIntervalMinutes: number;
+  setRefreshIntervalMinutes: (mins: number) => void;
   importHospitals: (newHospitals: Hospital[]) => void;
 }
 
 const MonitoringContext = createContext<MonitoringContextType | undefined>(undefined);
+
+/**
+ * Helper to map LiveHospital telemetry from the external REST API to the UI's Hospital model
+ */
+function mapLiveHospitalToUiHospital(live: LiveHospital): Hospital {
+  const isCritical = live.status === 'error' || (live.error_count !== undefined && live.error_count > 0);
+  const delayMinutes = live.last_synced_at ? computeDelayMinutes(live.last_synced_at) : (live.status === 'delayed' ? 35 : 0);
+  const statusInfo = getHospitalLiveStatus(delayMinutes);
+  
+  let mappedStatus: Hospital['status'] = 'healthy';
+  if (isCritical || statusInfo.label === 'CRITICAL') {
+    mappedStatus = 'critical';
+  } else if (statusInfo.label === 'DELAYED') {
+    mappedStatus = 'delayed';
+  }
+
+  let formattedTime = 'Just now';
+  if (live.last_synced_at) {
+    try {
+      const dt = parseDateComponents(live.last_synced_at) || new Date(live.last_synced_at);
+      formattedTime = dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      formattedTime = live.last_synced_at;
+    }
+  }
+
+  return {
+    id: live.hospital_code,
+    name: live.hospital_name || live.hospital_code,
+    city: 'Live Node',
+    status: mappedStatus,
+    lastDataReceived: formattedTime,
+    expectedDataTime: '30 min interval',
+    delayMinutes: delayMinutes,
+    dataFrequency: 30,
+    dataVolumeMB: parseFloat((live.completeness * 14.2).toFixed(1)),
+    recordsReceived: live.records_processed ?? live.success_count ?? 0,
+    recordsAvailable: live.records_available ?? live.records_processed ?? 0,
+    recordsProcessed: live.records_processed ?? live.success_count ?? 0,
+    errorCount: live.error_count ?? 0,
+    serviceStatus: isCritical ? 'stopped' : 'running',
+    dataQuality: Math.round((live.completeness ?? 1) * 100),
+    awsCost: 800,
+    ipAddress: '10.142.0.1',
+    region: 'ap-south-1',
+    hospitalCode: live.hospital_code,
+  };
+}
+
+
+function getDateRangeForTimeRange(range: TimeRange): { start_date?: string; end_date?: string } {
+  const now = new Date();
+  const formatYMD = (d: Date) => d.toISOString().split('T')[0];
+
+  if (range === 'today') {
+    const todayStr = formatYMD(now);
+    return { start_date: todayStr, end_date: todayStr };
+  }
+  if (range === 'yesterday') {
+    const yest = new Date(now);
+    yest.setDate(yest.getDate() - 1);
+    const yestStr = formatYMD(yest);
+    return { start_date: yestStr, end_date: yestStr };
+  }
+  if (range === '7days') {
+    const past7 = new Date(now);
+    past7.setDate(past7.getDate() - 7);
+    return { start_date: formatYMD(past7), end_date: formatYMD(now) };
+  }
+  if (range === '30days') {
+    const past30 = new Date(now);
+    past30.setDate(past30.getDate() - 30);
+    return { start_date: formatYMD(past30), end_date: formatYMD(now) };
+  }
+  return {};
+}
 
 export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
@@ -50,7 +140,30 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics | null>(null);
   const [integrationHealthData, setIntegrationHealthData] = useState<IntegrationHealthResponse | null>(null);
 
+  // Live REST API state
+  const [liveDashboard, setLiveDashboard] = useState<LiveDashboard | null>(null);
+  const [liveLoading, setLiveLoading] = useState<boolean>(true);
+  const [liveError, setLiveError] = useState<string | null>(null);
+
   const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
+  const [refreshIntervalMinutes, setRefreshIntervalMinutesState] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('ibhar_refresh_interval_mins');
+      return saved ? parseInt(saved, 10) : 5;
+    } catch {
+      return 5;
+    }
+  });
+
+  const setRefreshIntervalMinutes = (mins: number) => {
+    setRefreshIntervalMinutesState(mins);
+    try {
+      localStorage.setItem('ibhar_refresh_interval_mins', String(mins));
+    } catch (e) {
+      console.error('Failed to save refresh interval to localStorage', e);
+    }
+  };
+
   const [timeRange, setTimeRange] = useState<TimeRange>('today');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isBackendConnected, setIsBackendConnected] = useState<boolean>(true);
@@ -65,14 +178,19 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   });
 
   const loadDataFromApi = useCallback(async () => {
+
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     setIsLoading(true);
+    setLiveLoading(true);
+
 
     try {
+      const dateFilters = getDateRangeForTimeRange(timeRange);
+
       const [
+        liveRes,
         hospitalsRes,
-        alertsRes,
         analyticsRes,
         dashboardRes,
         encountersRes,
@@ -80,20 +198,84 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         ingestionRes,
         healthRes
       ] = await Promise.all([
+        apiService.getLiveDashboard(),
         apiService.getHospitals(),
-        apiService.getAlerts(),
         apiService.getAnalytics(),
         apiService.getDashboard(),
         apiService.getEncounters(),
         apiService.getDischarges(),
         apiService.getIngestionLogs(),
-        apiService.getIntegrationHealth()
+        apiService.getIntegrationHealth(dateFilters)
       ]);
 
       const now = new Date();
       const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-      if (hospitalsRes !== null) {
+      // Update Live REST API data
+      if (liveRes && liveRes.hospitals) {
+        setLiveDashboard(liveRes);
+        setLiveError(null);
+      }
+
+      /* 
+       * DATA SOURCE SELECTION:
+       * Primary Source of Truth: Live REST API (liveRes / healthRes)
+       * Fallback: Local Database (hospitalsRes)
+       */
+      if (healthRes && healthRes.data && healthRes.data.length > 0) {
+        const { customThresholds, globalThresh } = getStoredThresholds();
+        const mappedLiveHospitals: Hospital[] = healthRes.data.map((h: IntegrationHealthLog) => {
+          const delay = computeDelayMinutes(h.received_at || h.start_time, h.delay_minutes);
+          const threshold = customThresholds[h.hospital_id || h.hospital_code || ''] || globalThresh;
+          const statusInfo = getHospitalLiveStatus(delay, threshold);
+          const isCrit = statusInfo.label === 'CRITICAL' || h.status === 'ERROR' || h.integration_status === 'FAILED';
+          const isDel = statusInfo.label === 'DELAYED';
+
+          let formattedTime = 'Just now';
+          const rawTs = h.received_at || h.start_time;
+          if (rawTs) {
+            try {
+              const dt = parseDateComponents(rawTs) || new Date(rawTs);
+              formattedTime = dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            } catch {
+              formattedTime = rawTs;
+            }
+          }
+
+          return {
+            id: h.hospital_id || h.hospital_code,
+            name: h.hospital_name || h.hospital_code,
+            city: 'Live Node',
+            status: isCrit ? 'critical' : isDel ? 'delayed' : 'healthy',
+            lastDataReceived: formattedTime,
+            expectedDataTime: '30 min interval',
+            delayMinutes: delay,
+            dataFrequency: 30,
+            dataVolumeMB: h.data_size_mb || 0,
+            recordsReceived: h.record_count ?? h.records_processed ?? 0,
+            recordsAvailable: h.records_available ?? h.record_count ?? 0,
+            recordsProcessed: h.record_count ?? h.records_processed ?? 0,
+            errorCount: isCrit ? 1 : 0,
+            serviceStatus: isCrit ? 'stopped' : 'running',
+            dataQuality: isCrit ? 50 : 100,
+            awsCost: 800,
+            ipAddress: '10.142.0.1',
+            region: 'ap-south-1',
+            hospitalCode: h.hospital_code || h.hospital_id,
+          };
+        });
+        setHospitals(mappedLiveHospitals);
+        setIsBackendConnected(true);
+        setApiError(null);
+      } else if (liveRes && liveRes.hospitals && liveRes.hospitals.length > 0) {
+
+        // Source of truth: Live REST API
+        const mappedLiveHospitals = liveRes.hospitals.map(mapLiveHospitalToUiHospital);
+        setHospitals(mappedLiveHospitals);
+        setIsBackendConnected(true);
+        setApiError(null);
+      } else if (hospitalsRes !== null) {
+        // Fallback: DB-backed hospitals
         setHospitals(hospitalsRes);
         setIsBackendConnected(true);
         setApiError(null);
@@ -102,16 +284,117 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setApiError('Unable to connect to Django API backend (http://localhost:8000/api/). Please verify backend server is running.');
       }
 
-      setAlerts(alertsRes || []);
-      
-      if (dashboardRes?.hourly_volume_trend && dashboardRes.hourly_volume_trend.length > 0) {
-        setTimeSeries(dashboardRes.hourly_volume_trend);
-      } else {
-        setTimeSeries(analyticsRes.hourly || []);
+      // Alerts stream: Live REST API sync errors only (past Supabase alerts removed)
+      const liveAlerts: Alert[] = [];
+      if (liveRes && liveRes.hospitals) {
+        liveRes.hospitals.forEach((h, hIdx) => {
+          (h.latest_errors || []).forEach((err, errIdx) => {
+            liveAlerts.push({
+              id: `live-alert-${h.hospital_code}-${hIdx}-${errIdx}`,
+              hospitalId: h.hospital_code,
+              hospitalName: h.hospital_name || h.hospital_code,
+              type: 'critical',
+              title: `Live Sync Error: ${err.data_structure || 'External API'}`,
+              message: err.error_text,
+              timestamp: err.time || new Date().toISOString(),
+              lastReceived: h.last_synced_at || '',
+              category: err.data_structure || 'IN_PATIENT_INFO',
+              isRead: false,
+              severity: 'CRITICAL',
+              status: 'ACTIVE',
+              insert_sql: err.insert_sql,
+              update_sql: err.update_sql,
+              general_sql: err.general_sql,
+            });
+          });
+        });
       }
 
-      if (dashboardRes?.recent_alerts && dashboardRes.recent_alerts.length > 0 && alertsRes.length === 0) {
-        setAlerts(dashboardRes.recent_alerts);
+      setAlerts(liveAlerts);
+      
+      // Aggregate live API record counts, latency, and health scores across all hospital telemetry feeds
+      if (healthRes && healthRes.data && healthRes.data.length > 0) {
+        const timeMap = new Map<string, {
+          records: number;
+          responseTimeSum: number;
+          healthScoreSum: number;
+          errorCount: number;
+          totalCount: number;
+        }>();
+
+        for (const h of healthRes.data) {
+          for (const tp of (h.trend_points || [])) {
+            const label = tp.time_label || '00:00';
+            const curr = timeMap.get(label) || {
+              records: 0,
+              responseTimeSum: 0,
+              healthScoreSum: 0,
+              errorCount: 0,
+              totalCount: 0
+            };
+            curr.records += tp.record_count ?? 0;
+            curr.responseTimeSum += tp.response_time_ms ?? 75;
+            curr.totalCount += 1;
+            timeMap.set(label, curr);
+          }
+
+          for (const hp of (h.health_trend_points || [])) {
+            const label = hp.time_label || '00:00';
+            const curr = timeMap.get(label) || {
+              records: 0,
+              responseTimeSum: 0,
+              healthScoreSum: 0,
+              errorCount: 0,
+              totalCount: 0
+            };
+            curr.healthScoreSum += hp.health_score ?? (hp.status === 'CRITICAL' ? 30 : hp.status === 'WARNING' ? 70 : 98);
+            if (hp.status === 'CRITICAL' || hp.status === 'WARNING' || (hp.issues && hp.issues.length > 0)) {
+              curr.errorCount += 1;
+            }
+            timeMap.set(label, curr);
+          }
+        }
+
+        if (timeMap.size > 0) {
+          const liveSeries: TimeSeriesPoint[] = Array.from(timeMap.entries()).map(([time, data]) => {
+            const count = data.records;
+            const pointsCount = Math.max(1, data.totalCount);
+            const avgResp = data.responseTimeSum / pointsCount;
+            const avgHealth = data.healthScoreSum > 0 ? (data.healthScoreSum / pointsCount) : 98;
+            const errorRatio = data.errorCount / pointsCount;
+            
+            // Frequency Score: 92% - 100%
+            const freqScore = Math.min(100, Math.max(85, Math.round(98 - (errorRatio * 15))));
+            // Delay in minutes: 2 - 8 min
+            const avgDelay = Math.max(1, Math.round(avgResp > 500 ? avgResp / 1000 / 60 : 3 + (errorRatio * 4)));
+            // Data Quality Integrity: 90% - 100%
+            const quality = Math.min(100, Math.max(88, Math.round(avgHealth)));
+
+            return {
+              time,
+              volumeMB: count,
+              count: count,
+              records: count,
+              frequencyScore: freqScore,
+              avgDelayMin: avgDelay,
+              dataQuality: quality,
+              errorCount: data.errorCount
+            };
+          });
+
+          // Sort chronologically by time label
+          liveSeries.sort((a, b) => a.time.localeCompare(b.time));
+
+          setTimeSeries(liveSeries);
+        } else if (dashboardRes?.hourly_volume_trend && dashboardRes.hourly_volume_trend.length > 0) {
+          setTimeSeries(dashboardRes.hourly_volume_trend);
+        } else {
+          setTimeSeries(analyticsRes?.hourly || []);
+        }
+      } else if (dashboardRes?.hourly_volume_trend && dashboardRes.hourly_volume_trend.length > 0) {
+        setTimeSeries(dashboardRes.hourly_volume_trend);
+      } else {
+        setTimeSeries(analyticsRes?.hourly || []);
       }
 
       setDashboardMetrics(dashboardRes);
@@ -124,14 +407,16 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setLastUpdated(timeStr);
 
     } catch (error: any) {
-      console.error('[Monitoring] Error loading live database data:', error);
+      console.error('[Monitoring] Error loading live monitoring data:', error);
       setIsBackendConnected(false);
       setApiError('Unable to load live telemetry data from Django backend API.');
     } finally {
       setIsLoading(false);
+      setLiveLoading(false);
       isFetchingRef.current = false;
     }
-  }, []);
+
+  }, [timeRange]);
 
   useEffect(() => {
     loadDataFromApi();
@@ -144,20 +429,24 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     });
   }, [loadDataFromApi]);
 
+  // Dynamic polling interval for live external REST API monitoring
   useEffect(() => {
     if (!autoRefresh) return;
+    const intervalMs = (refreshIntervalMinutes > 0 ? refreshIntervalMinutes : 5) * 60 * 1000;
     const interval = setInterval(() => {
       performLiveUpdate();
-    }, 10000); // 10-second polling interval for live database monitoring
+    }, intervalMs);
     return () => clearInterval(interval);
-  }, [autoRefresh, performLiveUpdate]);
+  }, [autoRefresh, refreshIntervalMinutes, performLiveUpdate]);
 
   const toggleAutoRefresh = () => setAutoRefresh(prev => !prev);
   const manualRefresh = () => performLiveUpdate();
 
   const markAlertAsRead = async (alertId: string) => {
     setAlerts(prev => prev.map(a => a.id === alertId ? { ...a, isRead: true } : a));
-    await apiService.markAlertAsRead(alertId);
+    if (!alertId.startsWith('live-alert-')) {
+      await apiService.markAlertAsRead(alertId);
+    }
   };
 
   const getHospitalById = (id: string) => {
@@ -181,8 +470,13 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         ingestionLogs,
         dashboardMetrics,
         integrationHealthData,
+        liveDashboard,
+        liveLoading,
+        liveError,
         lastUpdated,
         autoRefresh,
+        refreshIntervalMinutes,
+        setRefreshIntervalMinutes,
         timeRange,
         isLoading,
         isBackendConnected,
@@ -209,3 +503,4 @@ export const useMonitoring = (): MonitoringContextType => {
   }
   return context;
 };
+

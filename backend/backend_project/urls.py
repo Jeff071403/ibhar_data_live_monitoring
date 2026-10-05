@@ -7,5 +7,6 @@ urlpatterns = [
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('api/', include('hospitals.urls')),
+    path('aws-costs/', include('aws_costs.urls')),
 ]
 

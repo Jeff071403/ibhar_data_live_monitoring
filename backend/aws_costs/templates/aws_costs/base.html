@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}AWS Cost & Usage Monitoring | IBHAR{% endblock %}</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'aws_costs/css/dashboard.css' %}">
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="bg-slate-950 text-slate-100 antialiased min-h-screen">
+    <header class="app-header">
+        <div class="header-container">
+            <div class="brand-group">
+                <div class="brand-logo">
+                    <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                    </svg>
+                </div>
+                <div class="brand-text">
+                    <div class="brand-title">
+                        <span>IBHAR</span>
+                        <span class="brand-subtitle-badge">AWS INFRA</span>
+                    </div>
+                    <p class="brand-desc">Cloud Cost & Telemetry Monitor</p>
+                </div>
+            </div>
+
+            <nav class="header-nav">
+                <a href="/api/docs/" class="nav-link" target="_blank">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="nav-icon"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    Swagger API
+                </a>
+                <a href="/api/live/dashboard/" class="nav-link" target="_blank">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="nav-icon"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    Live Telemetry API
+                </a>
+            </nav>
+
+            <div class="header-status-group">
+                {% if is_mock %}
+                <div class="badge-mock" title="Running against simulated AWS responses">
+                    <span class="badge-dot pulse-amber"></span>
+                    MOCK DATA MODE
+                </div>
+                {% else %}
+                <div class="badge-live" title="Live AWS API connection active">
+                    <span class="badge-dot pulse-green"></span>
+                    LIVE AWS ({{ region }})
+                </div>
+                {% endif %}
+
+                <div class="refresh-pill">
+                    <span class="refresh-indicator" id="refresh-indicator"></span>
+                    <span id="last-updated-text">Updating...</span>
+                    <button id="btn-manual-refresh" class="btn-refresh" title="Refresh Now">
+                        <svg class="refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Global API Error / Stale Banner -->
+    <div id="stale-banner" class="stale-banner hidden">
+        <div class="stale-banner-content">
+            <svg class="stale-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span id="stale-banner-message">Warning: Could not refresh live telemetry. Showing last known snapshot.</span>
+        </div>
+    </div>
+
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="app-footer">
+        <div class="footer-container">
+            <span>IBHAR Live Monitoring Platform &bull; AWS Cost & Telemetry Dashboard</span>
+            <span class="footer-meta">Auto-refreshes every 60s &bull; Wall Display Optimized</span>
+        </div>
+    </footer>
+
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

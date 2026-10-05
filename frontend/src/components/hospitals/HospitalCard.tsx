@@ -4,8 +4,8 @@ import { Card, type CardVariant } from '../common/Card';
 import { Badge } from '../common/Badge';
 import { CopyButton } from '../common/CopyButton';
 import type { Hospital } from '../../types';
-import { formatVolume } from '../../utils/formatters';
-import { Clock, HardDrive, Activity, AlertTriangle, ArrowUpRight } from 'lucide-react';
+import { formatNumber } from '../../utils/formatters';
+import { Clock, Layers, Activity, AlertTriangle, ArrowUpRight } from 'lucide-react';
 
 interface HospitalCardProps {
   hospital: Hospital;
@@ -33,7 +33,7 @@ export const HospitalCard: React.FC<HospitalCardProps> = ({ hospital, index }) =
               {hospital.name}
             </h3>
             <p className="text-xs text-white/85 font-sans mt-0.5">
-              Region: <span className="font-mono">{hospital.region}</span> • AWS Node
+              Live Telemetry Node • <span className="font-mono">{hospital.id}</span>
             </p>
           </div>
 
@@ -60,10 +60,10 @@ export const HospitalCard: React.FC<HospitalCardProps> = ({ hospital, index }) =
 
           <div>
             <span className="text-[10px] font-cute uppercase text-white/80 flex items-center gap-1 mb-0.5">
-              <HardDrive className="w-2.5 h-2.5 text-white/90" /> Data Volume
+              <Layers className="w-2.5 h-2.5 text-white/90" /> Processed
             </span>
             <span className="font-mono text-xs font-semibold text-white">
-              {formatVolume(hospital.dataVolumeMB)}
+              {formatNumber(hospital.recordsProcessed ?? hospital.recordsReceived)}
             </span>
           </div>
 
@@ -90,7 +90,7 @@ export const HospitalCard: React.FC<HospitalCardProps> = ({ hospital, index }) =
       {/* Footer */}
       <div className="flex items-center justify-between pt-2 border-t border-white/25 text-xs">
         <span className="text-[11px] text-white/85">
-          Quality: <strong className="text-white">{hospital.dataQuality}%</strong>
+          Completeness: <strong className="text-white">{hospital.dataQuality}%</strong>
         </span>
 
         <Link

@@ -3,30 +3,35 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useMonitoring } from '../../hooks/useMonitoring';
 import { apiService } from '../../services/api';
-import type { Hospital, TimeSeriesPoint } from '../../types';
+import type { Hospital, LiveHospital } from '../../types';
 import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { CopyButton } from '../../components/common/CopyButton';
 import { HospitalTimeline } from '../../components/hospitals/HospitalTimeline';
 import { Skeleton } from '../../components/common/Skeleton';
-import { formatCurrencyINR, formatVolume, formatNumber } from '../../utils/formatters';
+import { formatVolume, formatNumber } from '../../utils/formatters';
 import {
   ArrowLeft,
   Server,
   Globe,
-  Sparkles,
   FileText,
   Download,
   Calendar,
   Loader2,
   MoreHorizontal,
-  Settings
+  Settings,
+  AlertTriangle,
+  Code2,
+  Terminal,
+  Check,
+  Copy,
+  Database,
+  Layers
 } from 'lucide-react';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
 
 export const HospitalDetailsPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const { getHospitalById, hospitals } = useMonitoring();
+  const { getHospitalById, hospitals, alerts } = useMonitoring();
   const navigate = useNavigate();
 
   const hospitalIndex = hospitals.findIndex(h => h.id === id);
@@ -34,8 +39,10 @@ export const HospitalDetailsPage: React.FC = () => {
   const cardColorVariant = hospitalIndex !== -1 ? colors[hospitalIndex % colors.length] : 'peach';
 
   const [hospital, setHospital] = useState<Hospital | undefined>(undefined);
-  const [history, setHistory] = useState<TimeSeriesPoint[]>([]);
+  const [liveHospital, setLiveHospital] = useState<LiveHospital | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [activeQueryTab, setActiveQueryTab] = useState<'insert' | 'update' | 'general'>('insert');
+  const [copiedQueryKey, setCopiedQueryKey] = useState<string | null>(null);
 
   // Report center states
   const [reportType, setReportType] = useState<'pdf' | 'csv' | 'excel'>('pdf');
@@ -44,8 +51,6 @@ export const HospitalDetailsPage: React.FC = () => {
   const [generationProgress, setGenerationProgress] = useState(0);
   const [generationStep, setGenerationStep] = useState('');
   const [reportReady, setReportReady] = useState(false);
-  const [includeAlerts, setIncludeAlerts] = useState(true);
-  const [includeTimeline, setIncludeTimeline] = useState(true);
 
   const handleGenerateReport = () => {
     setIsGenerating(true);
@@ -118,27 +123,33 @@ Sync delay is currently at ${hospital.delayMinutes} minutes.
     document.body.removeChild(element);
   };
 
+  const handleCopyQuery = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedQueryKey(key);
+    setTimeout(() => setCopiedQueryKey(null), 2000);
+  };
+
   useEffect(() => {
     if (!id) return;
     setLoading(true);
     const found = getHospitalById(id);
     if (found) {
       setHospital(found);
-      apiService.getHospitalHistory(id).then(res => {
-        setHistory(res);
-        setLoading(false);
+      setLoading(false);
+      const codeToFetch = found.hospitalCode || found.id || id;
+      apiService.getLiveHospital(codeToFetch).then(liveRes => {
+        if (liveRes) setLiveHospital(liveRes);
       });
     } else {
       apiService.getHospitalById(id).then(res => {
-        setHospital(res);
         if (res) {
-          apiService.getHospitalHistory(id).then(hRes => {
-            setHistory(hRes);
-            setLoading(false);
+          setHospital(res);
+          const codeToFetch = res.hospitalCode || res.id || id;
+          apiService.getLiveHospital(codeToFetch).then(liveRes => {
+            if (liveRes) setLiveHospital(liveRes);
           });
-        } else {
-          setLoading(false);
         }
+        setLoading(false);
       });
     }
   }, [id, getHospitalById]);
@@ -238,7 +249,6 @@ Sync delay is currently at ${hospital.delayMinutes} minutes.
   const themeTextClass = getThemeTextClass(cardColorVariant);
   const currentTheme = getThemeClasses(cardColorVariant);
   const detailBorderClass = currentTheme.border;
-  const strokeColor = themeColor;
 
   return (
     <motion.div
@@ -294,132 +304,271 @@ Sync delay is currently at ${hospital.delayMinutes} minutes.
         </div>
       </Card>
 
-      {/* 8 Primary Metrics Cards Grid */}
+      {/* 8 Primary Metrics Cards Grid (Derived from Live Telemetry API) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-        <Card variant="default" style={{ borderColor: `${themeColor}35` }} className="p-3 text-center">
-          <span className="text-[10px] font-cute uppercase text-textLight-muted dark:text-textNight-muted block mb-1">
-            Last Received
+        {/* 1. Last Received / Last Sync */}
+        <div className="bg-white/80 dark:bg-night-card/80 backdrop-blur-md rounded-2xl p-3.5 border border-amber-200/40 dark:border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.03)] flex flex-col items-center justify-center text-center min-h-[95px] transition-all hover:border-amber-300 dark:hover:border-white/20">
+          <span className="text-[10px] font-sans font-semibold tracking-wider text-textLight-muted dark:text-textNight-muted uppercase block mb-1">
+            LAST RECEIVED
           </span>
-          <span className="font-mono text-xs font-bold text-textLight-heading dark:text-textNight-heading">
-            {hospital.lastDataReceived}
+          <span className="font-mono text-sm sm:text-base font-black text-textLight-heading dark:text-textNight-heading">
+            {liveHospital?.last_synced_at
+              ? new Date(liveHospital.last_synced_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : hospital.lastDataReceived}
           </span>
-        </Card>
+        </div>
 
-        <Card variant="default" style={{ borderColor: `${themeColor}35` }} className="p-3 text-center">
-          <span className="text-[10px] font-cute uppercase text-textLight-muted dark:text-textNight-muted block mb-1">
-            Expected
+        {/* 2. Expected Interval */}
+        <div className="bg-white/80 dark:bg-night-card/80 backdrop-blur-md rounded-2xl p-3.5 border border-amber-200/40 dark:border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.03)] flex flex-col items-center justify-center text-center min-h-[95px] transition-all hover:border-amber-300 dark:hover:border-white/20">
+          <span className="text-[10px] font-sans font-semibold tracking-wider text-textLight-muted dark:text-textNight-muted uppercase block mb-1">
+            EXPECTED
           </span>
-          <span className="font-mono text-xs font-bold text-textLight-heading dark:text-textNight-heading">
-            {hospital.expectedDataTime}
+          <span className="font-mono text-sm sm:text-base font-black text-textLight-heading dark:text-textNight-heading leading-tight">
+            {hospital.dataFrequency || 30} min
           </span>
-        </Card>
+          <span className="text-[9px] font-mono font-medium text-textLight-muted dark:text-textNight-muted mt-0.5">
+            interval
+          </span>
+        </div>
 
-        <Card variant="default" style={{ borderColor: `${themeColor}35` }} className="p-3 text-center">
-          <span className="text-[10px] font-cute uppercase text-textLight-muted dark:text-textNight-muted block mb-1">
-            Delay
+        {/* 3. Delay */}
+        <div className="bg-white/80 dark:bg-night-card/80 backdrop-blur-md rounded-2xl p-3.5 border border-amber-200/40 dark:border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.03)] flex flex-col items-center justify-center text-center min-h-[95px] transition-all hover:border-amber-300 dark:hover:border-white/20">
+          <span className="text-[10px] font-sans font-semibold tracking-wider text-textLight-muted dark:text-textNight-muted uppercase block mb-1">
+            DELAY
           </span>
-          <span className={`font-mono text-xs font-bold ${
-            hospital.delayMinutes > 30 ? 'text-[#8E3B49] dark:text-[#D99AA5]' : 'text-[#47664B] dark:text-[#91B7A5]'
+          <span className={`font-mono text-sm sm:text-base font-black ${
+            hospital.delayMinutes > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'
           }`}>
             {hospital.delayMinutes} min
           </span>
-        </Card>
+        </div>
 
-        <Card variant="default" style={{ borderColor: `${themeColor}35` }} className="p-3 text-center">
-          <span className="text-[10px] font-cute uppercase text-textLight-muted dark:text-textNight-muted block mb-1">
-            Service
+        {/* 4. Service / Sync Status */}
+        <div className="bg-white/80 dark:bg-night-card/80 backdrop-blur-md rounded-2xl p-3.5 border border-amber-200/40 dark:border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.03)] flex flex-col items-center justify-center text-center min-h-[95px] transition-all hover:border-amber-300 dark:hover:border-white/20">
+          <span className="text-[10px] font-sans font-semibold tracking-wider text-textLight-muted dark:text-textNight-muted uppercase block mb-1">
+            STATUS
           </span>
-          <span className="font-cute text-xs font-bold uppercase text-textLight-heading dark:text-textNight-heading">
-            {hospital.serviceStatus}
+          <span className={`font-mono text-xs sm:text-sm font-black uppercase ${
+            (liveHospital?.status || hospital.status) === 'error'
+              ? 'text-red-600 dark:text-red-400'
+              : (liveHospital?.status || hospital.status) === 'delayed'
+              ? 'text-amber-600 dark:text-amber-400'
+              : 'text-emerald-600 dark:text-emerald-400'
+          }`}>
+            {(liveHospital?.status || hospital.status || 'healthy').toUpperCase()}
           </span>
-        </Card>
+        </div>
 
-        <Card variant="default" style={{ borderColor: `${themeColor}35` }} className="p-3 text-center">
-          <span className="text-[10px] font-cute uppercase text-textLight-muted dark:text-textNight-muted block mb-1">
-            Quality
+        {/* 5. Quality / Completeness */}
+        <div className="bg-white/80 dark:bg-night-card/80 backdrop-blur-md rounded-2xl p-3.5 border border-amber-200/40 dark:border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.03)] flex flex-col items-center justify-center text-center min-h-[95px] transition-all hover:border-amber-300 dark:hover:border-white/20">
+          <span className="text-[10px] font-sans font-semibold tracking-wider text-textLight-muted dark:text-textNight-muted uppercase block mb-1">
+            COMPLETENESS
           </span>
-          <span className="font-mono text-xs font-bold text-textLight-heading dark:text-textNight-heading">
-            {hospital.dataQuality}%
+          <span className="font-mono text-sm sm:text-base font-black text-textLight-heading dark:text-textNight-heading">
+            {Math.round((liveHospital?.completeness ?? (hospital.dataQuality / 100)) * 100)}%
           </span>
-        </Card>
+        </div>
 
-        <Card variant="default" style={{ borderColor: `${themeColor}35` }} className="p-3 text-center">
-          <span className="text-[10px] font-cute uppercase text-textLight-muted dark:text-textNight-muted block mb-1">
-            Records
+        {/* 6. Records Processed */}
+        <div className="bg-white/80 dark:bg-night-card/80 backdrop-blur-md rounded-2xl p-3.5 border border-amber-200/40 dark:border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.03)] flex flex-col items-center justify-center text-center min-h-[95px] transition-all hover:border-amber-300 dark:hover:border-white/20">
+          <span className="text-[10px] font-sans font-semibold tracking-wider text-textLight-muted dark:text-textNight-muted uppercase block mb-1">
+            PROCESSED
           </span>
-          <span className="font-mono text-xs font-bold text-textLight-heading dark:text-textNight-heading">
-            {formatNumber(hospital.recordsReceived)}
+          <span className="font-mono text-sm sm:text-base font-black text-emerald-600 dark:text-emerald-400">
+            {formatNumber(liveHospital?.records_processed ?? liveHospital?.success_count ?? hospital.recordsReceived)}
           </span>
-        </Card>
+        </div>
 
-        <Card variant="default" style={{ borderColor: `${themeColor}35` }} className="p-3 text-center">
-          <span className="text-[10px] font-cute uppercase text-textLight-muted dark:text-textNight-muted block mb-1">
-            Volume
+        {/* 7. Records Available (Replaced mock Volume) */}
+        <div className="bg-white/80 dark:bg-night-card/80 backdrop-blur-md rounded-2xl p-3.5 border border-amber-200/40 dark:border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.03)] flex flex-col items-center justify-center text-center min-h-[95px] transition-all hover:border-amber-300 dark:hover:border-white/20">
+          <span className="text-[10px] font-sans font-semibold tracking-wider text-textLight-muted dark:text-textNight-muted uppercase block mb-1">
+            AVAILABLE
           </span>
-          <span className="font-mono text-xs font-bold text-textLight-heading dark:text-textNight-heading">
-            {formatVolume(hospital.dataVolumeMB)}
+          <span className="font-mono text-sm sm:text-base font-black text-textLight-heading dark:text-textNight-heading">
+            {formatNumber(liveHospital?.records_available ?? liveHospital?.records_processed ?? hospital.recordsReceived)}
           </span>
-        </Card>
+        </div>
 
-        <Card variant="default" style={{ borderColor: `${themeColor}35` }} className="p-3 text-center">
-          <span className="text-[10px] font-cute uppercase text-textLight-muted dark:text-textNight-muted block mb-1">
-            AWS Cost
+        {/* 8. Errors / Failures (Replaced mock AWS Cost) */}
+        <div className="bg-white/80 dark:bg-night-card/80 backdrop-blur-md rounded-2xl p-3.5 border border-amber-200/40 dark:border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.03)] flex flex-col items-center justify-center text-center min-h-[95px] transition-all hover:border-amber-300 dark:hover:border-white/20">
+          <span className="text-[10px] font-sans font-semibold tracking-wider text-textLight-muted dark:text-textNight-muted uppercase block mb-1">
+            ERRORS
           </span>
-          <span className="font-mono text-xs font-bold text-[#8A6F1E] dark:text-[#E5C46E]">
-            {formatCurrencyINR(hospital.awsCost)}
+          <span className={`font-mono text-sm sm:text-base font-black ${
+            (liveHospital?.error_count ?? 0) > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'
+          }`}>
+            {liveHospital?.error_count ?? 0}
           </span>
-        </Card>
+        </div>
       </div>
+
+      {/* Live Telemetry Error & SQL Query Trace Inspector */}
+      {(() => {
+        const currentCode = (hospital?.hospitalCode || hospital?.id || id || '').toLowerCase();
+        const currentName = (hospital?.name || '').toLowerCase();
+
+        const hospitalAlerts = alerts.filter(a => {
+          const aHospId = (a.hospitalId || '').toLowerCase();
+          const aHospName = (a.hospitalName || '').toLowerCase();
+          return (aHospId && (aHospId === currentCode || aHospId === (id || '').toLowerCase())) ||
+                 (aHospName && currentName && aHospName === currentName);
+        });
+
+        const errorList = liveHospital
+          ? (liveHospital.latest_errors || [])
+          : hospitalAlerts.map(a => ({
+              data_structure: a.category || 'IN_PATIENT_INFO',
+              error_text: a.message,
+              time: a.timestamp,
+              insert_sql: a.insert_sql,
+              update_sql: a.update_sql,
+              general_sql: a.general_sql
+            }));
+
+        if (errorList.length === 0) return null;
+
+        return (
+          <Card variant="default" className="border-red-400/60 dark:border-red-500/40 overflow-hidden shadow-xl bg-gradient-to-b from-red-500/[0.04] to-transparent">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-red-500/10 dark:bg-red-950/40 border-b border-red-500/20">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/30 shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-heading font-black text-sm sm:text-base text-red-600 dark:text-red-400 tracking-tight">
+                      LIVE TELEMETRY ERROR & SQL QUERY TRACE
+                    </h3>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase bg-red-500/20 text-red-700 dark:text-red-300 border border-red-500/40">
+                      {errorList.length} Active Incident{errorList.length > 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <p className="text-xs text-textLight-secondary dark:text-textNight-secondary font-sans mt-0.5">
+                    Exact API failure diagnostics, error trace, and executed SQL query payloads captured from external telemetry stream.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-6">
+              {errorList.map((errItem, errIdx) => {
+                const activeQuery =
+                  activeQueryTab === 'insert'
+                    ? (errItem.insert_sql || 'No Insert SQL query payload recorded.')
+                    : activeQueryTab === 'update'
+                    ? (errItem.update_sql || 'No Update SQL query payload recorded.')
+                    : (errItem.general_sql || 'No General SQL query payload recorded.');
+
+                const hasActiveQuery =
+                  activeQueryTab === 'insert'
+                    ? !!errItem.insert_sql
+                    : activeQueryTab === 'update'
+                    ? !!errItem.update_sql
+                    : !!errItem.general_sql;
+
+                return (
+                  <div key={errIdx} className="space-y-4 rounded-2xl bg-white/40 dark:bg-slate-900/40 p-4 border border-red-200/50 dark:border-red-900/30 shadow-sm">
+                    {/* Error Meta Information */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-black/5 dark:border-white/5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-textLight-heading dark:text-textNight-heading flex items-center gap-1.5 font-mono">
+                          <Layers className="w-3.5 h-3.5 text-lightAccent-peach dark:text-nightAccent-peach" />
+                          Component / Data Structure: <span className="px-2 py-0.5 rounded-md bg-nude-peachTint/60 dark:bg-night-cardElevated text-xs font-bold">{errItem.data_structure || 'IN_PATIENT_INFO'}</span>
+                        </span>
+                      </div>
+
+                      {errItem.time && (
+                        <span className="text-[11px] font-mono text-textLight-muted dark:text-textNight-muted flex items-center gap-1">
+                          <Calendar className="w-3 h-3" /> Timestamp: {errItem.time}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Exact Error Message from JSON */}
+                    <div>
+                      <label className="text-[11px] font-cute font-extrabold uppercase tracking-wider text-red-600 dark:text-red-400 block mb-1.5 flex items-center gap-1.5">
+                        <Terminal className="w-3.5 h-3.5" /> Exact Error Message (ErrorText)
+                      </label>
+                      <div className="p-3.5 rounded-xl bg-red-950/10 dark:bg-red-950/40 border border-red-400/40 dark:border-red-800/40 text-xs font-mono text-red-700 dark:text-red-300 leading-relaxed overflow-x-auto whitespace-pre-wrap select-all">
+                        {errItem.error_text}
+                      </div>
+                    </div>
+
+                    {/* SQL Queries from API */}
+                    <div>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                        <label className="text-[11px] font-cute font-extrabold uppercase tracking-wider text-textLight-heading dark:text-textNight-heading flex items-center gap-1.5">
+                          <Database className="w-3.5 h-3.5 text-blue-500" /> Executed SQL Queries from API
+                        </label>
+
+                        {/* Query Selection Tabs */}
+                        <div className="flex items-center gap-1 bg-white/80 dark:bg-slate-900/80 p-1 rounded-xl border border-black/5 dark:border-white/10 shadow-sm">
+                          {(['insert', 'update', 'general'] as const).map(tab => (
+                            <button
+                              key={tab}
+                              onClick={() => setActiveQueryTab(tab)}
+                              className={`px-3 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
+                                activeQueryTab === tab
+                                  ? 'bg-blue-600 text-white shadow-sm'
+                                  : 'text-textLight-secondary dark:text-textNight-secondary hover:bg-black/5 dark:hover:bg-white/5'
+                              }`}
+                            >
+                              {tab === 'insert' ? 'InsertSQL' : tab === 'update' ? 'UpdateSQL' : 'GeneralSQL'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* SQL Code Block */}
+                      <div className="relative rounded-2xl bg-slate-950 text-slate-100 p-4 font-mono text-xs overflow-x-auto border border-slate-800 shadow-inner">
+                        <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800 text-[11px] text-slate-400">
+                          <span className="font-bold uppercase tracking-wider text-blue-400 flex items-center gap-1.5">
+                            <Code2 className="w-3.5 h-3.5" />
+                            {activeQueryTab === 'insert' ? 'Insert Query Payload (InsertSQL)' : activeQueryTab === 'update' ? 'Update Query Payload (UpdateSQL)' : 'General Query Payload (GeneralSQL)'}
+                          </span>
+
+                          {hasActiveQuery && (
+                            <button
+                              onClick={() => handleCopyQuery(activeQuery, `${errIdx}-${activeQueryTab}`)}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs transition-colors cursor-pointer"
+                            >
+                              {copiedQueryKey === `${errIdx}-${activeQueryTab}` ? (
+                                <>
+                                  <Check className="w-3 h-3 text-green-400" />
+                                  <span className="text-green-400">Copied!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3 h-3" />
+                                  <span>Copy Query</span>
+                                </>
+                              )}
+                            </button>
+                          )}
+                        </div>
+
+                        <pre className="whitespace-pre-wrap leading-relaxed select-all text-slate-200">
+                          {activeQuery}
+                        </pre>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        );
+      })()}
 
       {/* Data Flow Timeline Section */}
       <Card variant="default" style={{ borderColor: `${themeColor}35` }}>
-        <HospitalTimeline delayMinutes={hospital.delayMinutes} />
-      </Card>
-
-      {/* Historical Payload Volume Chart for this Hospital */}
-      <Card variant="default" style={{ borderColor: `${themeColor}35` }}>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="font-heading font-bold text-base text-textLight-heading dark:text-textNight-heading">
-              HOURLY TELEMETRY VOLUME TREND
-            </h3>
-            <p className="text-xs text-textLight-secondary dark:text-textNight-secondary font-sans">
-              Transmission volume profile for {hospital.id} in past 7 hours
-            </p>
-          </div>
-          <Sparkles className={`w-4 h-4 ${themeTextClass}`} />
-        </div>
-
-        <div className="w-full h-56">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={history} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="hospHistGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={strokeColor} stopOpacity={0.4} />
-                  <stop offset="95%" stopColor={strokeColor} stopOpacity={0.0} />
-                </linearGradient>
-              </defs>
-              <XAxis dataKey="time" stroke={strokeColor} fontSize={11} fontFamily="Manrope" />
-              <YAxis stroke={strokeColor} fontSize={11} fontFamily="Manrope" unit=" MB" />
-              <Tooltip
-                content={({ active, payload, label }) => {
-                  if (active && payload && payload.length) {
-                    return (
-                      <div className="bg-nude-card dark:bg-night-cardElevated p-3 rounded-xl border border-[#EFE4DC] dark:border-[#193247] shadow-xl text-xs font-sans">
-                        <p className="font-bold text-textLight-heading dark:text-textNight-heading mb-1">{label}</p>
-                        <p className="text-lightAccent-softBlue dark:text-nightAccent-powderBlue font-mono font-bold">
-                          Volume: {payload[0].value} MB
-                        </p>
-                      </div>
-                    );
-                  }
-                  return null;
-                }}
-              />
-              <Area type="monotone" dataKey="volumeMB" stroke={strokeColor} strokeWidth={2.5} fill="url(#hospHistGrad)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
+        <HospitalTimeline
+          delayMinutes={hospital.delayMinutes}
+          lastSyncedAt={liveHospital?.last_synced_at}
+          lastDataReceived={hospital.lastDataReceived}
+          status={liveHospital?.status || hospital.status}
+          expectedIntervalMinutes={hospital.dataFrequency || 30}
+        />
       </Card>
 
       {/* Hospital Telemetry Report Center Card */}
@@ -440,7 +589,7 @@ Sync delay is currently at ${hospital.delayMinutes} minutes.
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
           {/* Column 1: Config Form */}
           <div className="space-y-4 p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-800/20 border border-slate-100 dark:border-slate-800/80">
             <h4 className="font-cute font-extrabold text-xs text-textLight-heading dark:text-textNight-heading uppercase tracking-wider">
@@ -496,48 +645,7 @@ Sync delay is currently at ${hospital.delayMinutes} minutes.
             </div>
           </div>
 
-          {/* Column 2: Data Options */}
-          <div className="space-y-4 p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-800/20 border border-slate-100 dark:border-slate-800/80">
-            <h4 className="font-cute font-extrabold text-xs text-textLight-heading dark:text-textNight-heading uppercase tracking-wider">
-              2. Data Content
-            </h4>
-
-            <div className="space-y-3 pt-2">
-              <label className="flex items-center gap-3 text-xs text-textLight-secondary dark:text-textNight-secondary cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  disabled={isGenerating}
-                  checked={includeAlerts}
-                  onChange={(e) => setIncludeAlerts(e.target.checked)}
-                  className="rounded border-slate-300 dark:border-slate-700 text-emerald-600 focus:ring-emerald-500 w-4 h-4"
-                />
-                <div>
-                  <span className="font-bold block">Include Incident Records</span>
-                  <span className="text-[10px] text-textLight-muted dark:text-textNight-muted">
-                    Append recent connection drops and delay flags.
-                  </span>
-                </div>
-              </label>
-
-              <label className="flex items-center gap-3 text-xs text-textLight-secondary dark:text-textNight-secondary cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  disabled={isGenerating}
-                  checked={includeTimeline}
-                  onChange={(e) => setIncludeTimeline(e.target.checked)}
-                  className="rounded border-slate-300 dark:border-slate-700 text-emerald-600 focus:ring-emerald-500 w-4 h-4"
-                />
-                <div>
-                  <span className="font-bold block">Include Raw Metrics Stream</span>
-                  <span className="text-[10px] text-textLight-muted dark:text-textNight-muted">
-                    Include data volumes and quality scores.
-                  </span>
-                </div>
-              </label>
-            </div>
-          </div>
-
-          {/* Column 3: Actions & Progress Center */}
+          {/* Column 2: Actions & Progress Center */}
           <div className="flex flex-col justify-center items-center p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-800/20 border border-slate-100 dark:border-slate-800/80 text-center">
             {/* Case A: Initial State */}
             {!isGenerating && !reportReady && (

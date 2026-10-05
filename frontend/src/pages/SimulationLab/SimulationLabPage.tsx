@@ -624,7 +624,7 @@ export const SimulationLabPage: React.FC = () => {
             <div className="lg:col-span-2 space-y-4">
               <Card className="p-5 border-slate-200 dark:border-slate-800">
                 <h3 className="font-heading font-black text-sm text-textLight-heading dark:text-textNight-heading mb-1">
-                  PostgreSQL Schema Configuration
+                  Database Schema Definition (SQL)
                 </h3>
                 <p className="text-xs text-textLight-secondary dark:text-textNight-secondary mb-4">
                   The SQL script illustrating table constraints, indexes, check rules, and sequence definitions.

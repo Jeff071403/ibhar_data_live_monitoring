@@ -7,10 +7,11 @@ import {
   BarChart3,
   HeartPulse,
   GitCompare,
-  FileSpreadsheet,
-  MoreHorizontal,
+  Settings,
   Activity,
-  Sparkles
+  Sparkles,
+  TrendingUp,
+  Coins
 } from 'lucide-react';
 import { useMonitoring } from '../../hooks/useMonitoring';
 
@@ -27,17 +28,18 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ isExpanded, setIsExpanded }) => {
-  const { unreadAlertsCount } = useMonitoring();
+  const { unreadAlertsCount, hospitals, isBackendConnected } = useMonitoring();
 
   const navItems: NavItem[] = [
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
+    { name: 'Live', path: '/live', icon: TrendingUp },
     { name: 'Hospitals', path: '/hospitals', icon: Building2 },
     { name: 'Alerts', path: '/alerts', icon: BellRing, badge: unreadAlertsCount },
     { name: 'Analytics', path: '/analytics', icon: BarChart3 },
+    { name: 'AWS Costs', path: '/aws-costs', icon: Coins },
     { name: 'Integration Health', path: '/integration-health', icon: HeartPulse },
     { name: 'Comparison', path: '/comparison', icon: GitCompare },
-    { name: 'Reports', path: '/reports', icon: FileSpreadsheet },
-    { name: 'More & Settings', path: '/more', icon: MoreHorizontal },
+    { name: 'Settings', path: '/settings', icon: Settings },
   ];
 
   const handleItemClick = () => {
@@ -137,23 +139,29 @@ export const Sidebar: React.FC<SidebarProps> = ({ isExpanded, setIsExpanded }) =
       {/* System Quick Status Footer */}
       <div className="mt-auto pt-3 border-t-2 border-slate-100 dark:border-slate-800">
         <div
-          className={`rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border-2 border-emerald-200 dark:border-emerald-800 transition-all ${
+          className={`rounded-2xl ${
+            isBackendConnected 
+              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-2 border-emerald-200 dark:border-emerald-800' 
+              : 'bg-rose-50 dark:bg-rose-950/60 border-2 border-rose-200 dark:border-rose-800'
+          } transition-all ${
             isExpanded ? 'p-3' : 'p-2.5 flex justify-center'
           }`}
         >
           {isExpanded ? (
             <div>
               <div className="flex items-center justify-between text-xs mb-1">
-                <span className="font-extrabold text-emerald-800 dark:text-emerald-300">System Health</span>
-                <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-600 animate-pulse" />
+                <span className={`font-extrabold ${isBackendConnected ? 'text-emerald-800 dark:text-emerald-300' : 'text-rose-800 dark:text-rose-300'}`}>
+                  Live Telemetry API
+                </span>
+                <span className={`inline-block w-2.5 h-2.5 rounded-full ${isBackendConnected ? 'bg-emerald-600 animate-pulse' : 'bg-rose-600'}`} />
               </div>
               <p className="text-[11px] font-bold text-slate-600 dark:text-slate-400">
-                90 Connectors • AWS ap-south-1
+                {hospitals.length || 47} Hospitals • Live Cloud Stream
               </p>
             </div>
           ) : (
-            <div className="flex items-center gap-1" title="System Health: Healthy">
-              <span className="inline-block w-3 h-3 rounded-full bg-emerald-600 animate-pulse" />
+            <div className="flex items-center gap-1" title={isBackendConnected ? "Live Telemetry API: Connected" : "Live Telemetry API: Disconnected"}>
+              <span className={`inline-block w-3 h-3 rounded-full ${isBackendConnected ? 'bg-emerald-600 animate-pulse' : 'bg-rose-600'}`} />
             </div>
           )}
         </div>

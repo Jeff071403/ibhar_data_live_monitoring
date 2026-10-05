@@ -9,6 +9,9 @@ export interface Hospital {
   dataFrequency: number;
   dataVolumeMB: number;
   recordsReceived: number;
+  recordsAvailable?: number;
+  recordsProcessed?: number;
+  errorCount?: number;
   serviceStatus: 'running' | 'stopped' | 'degraded';
   dataQuality: number;
   awsCost: number;
@@ -76,14 +79,20 @@ export interface Alert {
   isRead: boolean;
   severity?: string;
   status?: string;
+  insert_sql?: string | null;
+  update_sql?: string | null;
+  general_sql?: string | null;
 }
 
 export interface TimeSeriesPoint {
   time: string;
   volumeMB: number;
-  frequencyScore: number;
-  avgDelayMin: number;
-  dataQuality: number;
+  frequencyScore?: number;
+  avgDelayMin?: number;
+  dataQuality?: number;
+  count?: number;
+  records?: number;
+  errorCount?: number;
 }
 
 export interface DataOperationItem {
@@ -202,10 +211,17 @@ export interface IntegrationHealthLog {
   hospital_name: string;
   hospital_code?: string;
   data_type: string;
+  data_structure?: string;
+  service_name?: string;
   received_at?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  duration_seconds?: number;
   expected_at?: string | null;
   delay_minutes: number;
   record_count: number;
+  records_available?: number;
+  records_processed?: number;
   data_size_mb: number;
   response_time_ms: number;
   status: string;
@@ -225,7 +241,14 @@ export interface IntegrationHealthSummary {
   total_records: number;
   total_volume_mb: number;
   average_response_time_ms: number;
+  average_duration_seconds?: number;
+  latest_start_time?: string | null;
+  latest_end_time?: string | null;
   last_successful_ingestion?: string | null;
+  general_process_records?: number;
+  vamr_process_records?: number;
+  general_process_entities?: number;
+  vamr_process_entities?: number;
 }
 
 export interface IntegrationHealthResponse {
@@ -233,5 +256,39 @@ export interface IntegrationHealthResponse {
   summary: IntegrationHealthSummary;
   issues: IntegrationHealthLog[];
   recent_activity: IntegrationHealthLog[];
+}
+
+export interface LiveError {
+  data_structure: string;
+  error_text: string;
+  time: string | null;
+  insert_sql?: string | null;
+  update_sql?: string | null;
+  general_sql?: string | null;
+}
+
+export interface LiveDataStructure {
+  name: string;
+  last_synced_at: string | null;
+  status: string;
+}
+
+export interface LiveHospital {
+  hospital_code: string;
+  hospital_name: string | null;
+  status: 'healthy' | 'delayed' | 'error' | 'idle';
+  last_synced_at: string | null;
+  success_count: number;
+  error_count: number;
+  records_available?: number;
+  records_processed?: number;
+  completeness: number;
+  latest_errors: LiveError[];
+  per_data_structure: LiveDataStructure[];
+}
+
+export interface LiveDashboard {
+  hospitals: LiveHospital[];
+  hospital_count: number;
 }
 

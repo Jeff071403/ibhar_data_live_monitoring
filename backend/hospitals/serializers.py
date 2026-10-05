@@ -58,6 +58,8 @@ class DischargeSerializer(serializers.ModelSerializer):
 
 class DataIngestionLogSerializer(serializers.ModelSerializer):
     hospital_name = serializers.SerializerMethodField()
+    hospital_code = serializers.SerializerMethodField()
+    service_name = serializers.SerializerMethodField()
     delay_minutes = serializers.SerializerMethodField()
     integration_status = serializers.SerializerMethodField()
 
@@ -67,7 +69,9 @@ class DataIngestionLogSerializer(serializers.ModelSerializer):
             'id',
             'hospital_id',
             'hospital_name',
+            'hospital_code',
             'data_type',
+            'service_name',
             'received_at',
             'expected_at',
             'delay_minutes',
@@ -85,6 +89,17 @@ class DataIngestionLogSerializer(serializers.ModelSerializer):
             return obj.hospital.display_name
         return obj.hospital_id or ''
 
+    def get_hospital_code(self, obj):
+        if obj.hospital and obj.hospital.hospital_code:
+            return obj.hospital.hospital_code
+        return obj.hospital_id or ''
+
+    def get_service_name(self, obj):
+        dt = (obj.data_type or '').upper()
+        if 'VAMR' in dt or 'AST' in dt or 'VITEK' in dt:
+            return 'VAMR Process Data Entities'
+        return 'GENERAL Process Data Entities'
+
     def get_delay_minutes(self, obj):
         if not obj.received_at:
             return 0
@@ -93,18 +108,15 @@ class DataIngestionLogSerializer(serializers.ModelSerializer):
             expected = make_aware_if_needed(obj.expected_at)
             delta = received - expected
             return max(0, int(delta.total_seconds() / 60))
-        now = timezone.now()
-        received = make_aware_if_needed(obj.received_at)
-        delta = now - received
-        return max(0, int(delta.total_seconds() / 60))
+        return 0
 
     def get_integration_status(self, obj):
-        if obj.error_message or (obj.status and obj.status.upper() in ['FAILED', 'ERROR']):
+        if obj.error_message or (obj.status and obj.status.upper() in ['FAILED', 'ERROR', 'CRITICAL']):
             return 'FAILED'
         delay = self.get_delay_minutes(obj)
         if delay > 30:
             return 'DELAYED'
-        if obj.status and obj.status.upper() in ['SUCCESS', 'RECEIVED']:
+        if obj.status and obj.status.upper() in ['SUCCESS', 'RECEIVED', 'RECEIVING', 'ACTIVE']:
             return 'RECEIVING'
         return 'RECEIVING' if obj.status == 'SUCCESS' else 'UNKNOWN'
 

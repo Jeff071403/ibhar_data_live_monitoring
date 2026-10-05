@@ -1,12 +1,12 @@
 # IBHAR Live Hospital Data Monitoring — Django REST Backend
 
-High-performance Django REST Framework API connected to Supabase PostgreSQL database for live hospital telemetry, encounters, discharges, ingestion logs, and alerting monitoring.
+High-performance Django REST Framework API for live hospital telemetry, encounters, discharges, ingestion logs, real-time sync metrics, and alerting monitoring.
 
 ---
 
 ## 🛠️ Tech Stack
 - **Framework**: Python 3.10+, Django 5.x, Django REST Framework
-- **Database**: Supabase PostgreSQL (`psycopg2-binary` / `psycopg`) with `managed=False` models
+- **Database**: SQLite (Local) / External Live REST Telemetry API
 - **Documentation**: OpenAPI 3.0 via `drf-spectacular` & Swagger UI
 - **CORS**: `django-cors-headers`
 
@@ -23,9 +23,10 @@ backend/
 │   ├── wsgi.py
 │   └── asgi.py
 ├── hospitals/
-│   ├── models.py       # Django models mapped to Supabase PostgreSQL tables
+│   ├── models.py       # Django models for hospital data & telemetry
 │   ├── serializers.py  # DRF Serializers
 │   ├── views.py        # APIViews for Hospitals, Encounters, Discharges, Ingestion & Alerts
+│   ├── live_views.py   # Live REST API Telemetry endpoints
 │   ├── services.py     # Aggregation & hospital status calculation logic
 │   ├── urls.py         # REST Endpoint routes
 │   └── tests.py        # API Unit tests
@@ -51,17 +52,12 @@ pip install -r requirements.txt
 ```
 
 ### 3. Environment Variables
-Copy `.env.example` to `.env` and populate your Supabase PostgreSQL credentials:
+Copy `.env.example` to `.env`:
 ```ini
 DJANGO_SECRET_KEY=your_secret_key
 DEBUG=True
 
-DB_ENGINE=postgresql
-DB_NAME=postgres
-DB_USER=postgres
-DB_PASSWORD=your_supabase_password
-DB_HOST=your_supabase_host
-DB_PORT=5432
+DB_ENGINE=sqlite
 
 CORS_ALLOWED_ORIGINS=http://localhost:5173
 ```

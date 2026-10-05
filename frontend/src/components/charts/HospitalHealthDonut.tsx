@@ -9,13 +9,11 @@ export const HospitalHealthDonut: React.FC = () => {
   const isDark = theme === 'dark';
 
   const healthyCount = hospitals.filter(h => h.status === 'healthy').length;
-  const delayedCount = hospitals.filter(h => h.status === 'delayed').length;
   const criticalCount = hospitals.filter(h => h.status === 'critical' || h.status === 'warning' || h.status === 'offline').length;
 
   const data = [
     { name: 'Healthy', value: healthyCount, colorLight: '#059669', colorDark: '#34D399' },
-    { name: 'Delayed', value: delayedCount, colorLight: '#D97706', colorDark: '#FBBF24' },
-    { name: 'Critical/Warning', value: criticalCount, colorLight: '#DC2626', colorDark: '#F87171' },
+    { name: 'Issue', value: criticalCount, colorLight: '#DC2626', colorDark: '#F87171' },
   ];
 
   const totalHospitals = hospitals.length;

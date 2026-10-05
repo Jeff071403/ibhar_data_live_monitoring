@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { motion } from 'framer-motion';
 import { useMonitoring } from '../../hooks/useMonitoring';
 import { AlertCard } from '../../components/alerts/AlertCard';
@@ -7,16 +7,6 @@ import { BellRing, CheckCheck } from 'lucide-react';
 
 export const AlertsPage: React.FC = () => {
   const { alerts, markAlertAsRead } = useMonitoring();
-  const [activeTab, setActiveTab] = useState<'all' | 'critical' | 'warning' | 'resolved'>('all');
-
-  const filteredAlerts = alerts.filter(a => {
-    if (activeTab === 'all') return true;
-    return a.type === activeTab;
-  });
-
-  const criticalCount = alerts.filter(a => a.type === 'critical').length;
-  const warningCount = alerts.filter(a => a.type === 'warning').length;
-  const resolvedCount = alerts.filter(a => a.type === 'resolved').length;
 
   return (
     <motion.div
@@ -29,64 +19,45 @@ export const AlertsPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="font-heading font-extrabold text-2xl text-textLight-heading dark:text-textNight-heading flex items-center gap-2">
-            TELEMETRY ALERTS & INCIDENTS
+            TELEMETRY ALERTS
           </h2>
           <p className="text-xs text-textLight-secondary dark:text-textNight-secondary font-sans mt-0.5">
-            Real-time automated incident detection for delayed feeds, connector failures & quality drops
+            Real-time automated incident and sync error notifications
           </p>
         </div>
 
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-nude-card dark:bg-night-card border border-[#EFE4DC] dark:border-[#102437] text-xs font-mono">
-          <BellRing className="w-4 h-4 text-lightAccent-coral dark:text-nightAccent-coral" />
-          <span>Active Incidents: <strong>{criticalCount + warningCount}</strong></span>
-        </div>
-      </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-nude-card dark:bg-night-card border border-[#EFE4DC] dark:border-[#102437] text-xs font-mono">
+            <BellRing className="w-4 h-4 text-lightAccent-coral dark:text-nightAccent-coral" />
+            <span>Total Alerts: <strong>{alerts.length}</strong></span>
+          </div>
 
-      {/* Filter Tabs */}
-      <div className="flex items-center justify-between gap-2 p-2 rounded-card-lg bg-nude-card dark:bg-night-card border border-[#EFE4DC] dark:border-[#102437] shadow-nude-soft dark:shadow-night-soft">
-        <div className="flex items-center gap-1.5 overflow-x-auto">
-          {[
-            { id: 'all', label: 'All Alerts', count: alerts.length },
-            { id: 'critical', label: 'Critical', count: criticalCount },
-            { id: 'warning', label: 'Warning', count: warningCount },
-            { id: 'resolved', label: 'Resolved', count: resolvedCount },
-          ].map((tab) => (
+          {alerts.length > 0 && (
             <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`px-4 py-2 rounded-xl text-xs font-cute font-bold transition-all whitespace-nowrap cursor-pointer ${
-                activeTab === tab.id
-                  ? 'bg-nude-peachTint dark:bg-night-cardElevated text-textLight-heading dark:text-textNight-heading border border-[#E8A982]/40 dark:border-[#DDA27E]/40 shadow-sm'
-                  : 'text-textLight-secondary dark:text-textNight-secondary hover:bg-nude-cardSec dark:hover:bg-night-cardSoft'
-              }`}
+              onClick={() => alerts.forEach(a => markAlertAsRead(a.id))}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-nude-peachTint/70 dark:bg-night-cardElevated text-xs font-cute font-bold text-textLight-heading dark:text-textNight-heading border border-[#E8A982]/40 hover:bg-nude-peachTint dark:hover:bg-night-cardSoft transition-all shadow-sm cursor-pointer"
             >
-              {tab.label} <span className="opacity-60 ml-0.5">({tab.count})</span>
+              <CheckCheck className="w-4 h-4 text-[#91A995]" />
+              <span>Mark All Read</span>
             </button>
-          ))}
+          )}
         </div>
-
-        <button
-          onClick={() => alerts.forEach(a => markAlertAsRead(a.id))}
-          className="hidden sm:flex items-center gap-1 text-xs font-cute text-textLight-secondary dark:text-textNight-secondary hover:text-lightAccent-peach dark:hover:text-nightAccent-peach transition-colors px-3 py-1.5"
-        >
-          <CheckCheck className="w-4 h-4" />
-          <span>Mark All Read</span>
-        </button>
       </div>
 
       {/* Alerts List */}
-      {filteredAlerts.length > 0 ? (
+      {alerts.length > 0 ? (
         <div className="space-y-4">
-          {filteredAlerts.map((alert) => (
+          {alerts.map((alert) => (
             <AlertCard key={alert.id} alert={alert} onMarkRead={markAlertAsRead} />
           ))}
         </div>
       ) : (
         <EmptyState
           title="No Alerts Found"
-          message={`No telemetry alerts currently categorized under "${activeTab}". Everything is operating normally.`}
+          message="There are currently no telemetry alerts. Everything is operating normally."
         />
       )}
     </motion.div>
   );
 };
+

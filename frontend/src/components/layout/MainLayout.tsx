@@ -17,7 +17,7 @@ export const MainLayout: React.FC = () => {
         isSidebarExpanded ? 'lg:pl-[272px]' : 'lg:pl-[96px]'
       }`}>
         <Header />
-        <main className="flex-1 p-4 lg:p-8 max-w-7xl w-full mx-auto space-y-6">
+        <main className="flex-1 p-2 sm:p-3 lg:p-4 w-full max-w-full space-y-4">
           <Outlet />
         </main>
       </div>

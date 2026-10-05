@@ -12,6 +12,7 @@ interface MetricMiniCardProps {
   variant: CardVariant;
   sparklineData: number[];
   gradientColors: [string, string];
+  onClick?: () => void;
 }
 
 export const MetricMiniCard: React.FC<MetricMiniCardProps> = ({
@@ -22,7 +23,8 @@ export const MetricMiniCard: React.FC<MetricMiniCardProps> = ({
   isPositive = true,
   variant,
   sparklineData,
-  gradientColors
+  gradientColors,
+  onClick
 }) => {
   const chartData = sparklineData.map((val, idx) => ({ idx, val }));
   const gradId = `sparkGrad-${title.replace(/\s+/g, '')}`;
@@ -30,7 +32,12 @@ export const MetricMiniCard: React.FC<MetricMiniCardProps> = ({
   const outlineVariant = `outline-${variant}` as CardVariant;
 
   return (
-    <Card variant={outlineVariant} hoverEffect={true} className="flex flex-col justify-between h-full">
+    <Card
+      variant={outlineVariant}
+      hoverEffect={true}
+      className={`flex flex-col justify-between h-full ${onClick ? 'cursor-pointer transition-transform hover:-translate-y-1' : ''}`}
+      onClick={onClick}
+    >
       <div>
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200">

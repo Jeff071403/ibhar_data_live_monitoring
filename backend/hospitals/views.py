@@ -708,127 +708,28 @@ def compute_hospital_health_trend(h_logs, hospital_id):
     return health_trend
 
 
+from .live_sync_service import get_live_integration_health
+
+
 class IntegrationHealthView(APIView):
     """
-    GET /api/ingestion/health/ - Complete Integration Health summary & hospital ingestion matrix.
-    Supports query parameters: start_date, end_date (YYYY-MM-DD), hospital_id, status.
+    GET /api/ingestion/health/ - 100% Live External API Integration Health summary & hospital ingestion matrix.
+    Supports query parameters: start_date, end_date (YYYY-MM-DD), hospital_id, data_structure, service_name, status, search.
     """
-    @extend_schema(summary="Get integration health summary & detailed hospital ingestion metrics")
+    @extend_schema(summary="Get live integration health summary & hospital ingestion metrics from GetDataSyncDetails")
     def get(self, request):
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
-        hospital_id_param = request.query_params.get('hospital_id')
-        status_param = request.query_params.get('status')
+        filters = {
+            'start_date': request.query_params.get('start_date'),
+            'end_date': request.query_params.get('end_date'),
+            'hospital_id': request.query_params.get('hospital_id'),
+            'data_structure': request.query_params.get('data_structure') or request.query_params.get('data_type'),
+            'service_name': request.query_params.get('service_name'),
+            'status': request.query_params.get('status'),
+            'search': request.query_params.get('search'),
+        }
 
-        logs_qs = DataIngestionLog.objects.all()
-        if start_date:
-            logs_qs = logs_qs.filter(received_at__date__gte=start_date)
-        if end_date:
-            logs_qs = logs_qs.filter(received_at__date__lte=end_date)
-        if hospital_id_param and hospital_id_param != 'ALL':
-            logs_qs = logs_qs.filter(hospital_id=hospital_id_param)
-        if status_param and status_param != 'ALL':
-            logs_qs = logs_qs.filter(status__iexact=status_param)
-
-        hospitals = Hospital.objects.all().order_by('hospital_id')
-        if hospital_id_param and hospital_id_param != 'ALL':
-            hospitals = hospitals.filter(hospital_id=hospital_id_param)
-
-        total_hospitals = hospitals.count()
-
-        hospital_ingestion_list = []
-        receiving_count = 0
-        delayed_count = 0
-        failed_count = 0
-        unknown_count = 0
-
-        for h in hospitals:
-            h_logs = logs_qs.filter(hospital_id=h.hospital_id).order_by('received_at')
-            trend_points = []
-            for item in h_logs:
-                if item.received_at:
-                    rec_time = make_aware_if_needed(item.received_at)
-                    trend_points.append({
-                        "timestamp": rec_time.isoformat(),
-                        "time_label": rec_time.strftime('%H:%M'),
-                        "record_count": item.record_count or 0,
-                        "data_size_mb": item.data_size_mb or 0.0,
-                        "response_time_ms": item.response_time_ms or 0
-                    })
-
-            health_trend_points = compute_hospital_health_trend(h_logs, h.hospital_id)
-
-            latest_log = logs_qs.filter(hospital_id=h.hospital_id).order_by('-received_at').first()
-            if not latest_log:
-                hospital_ingestion_list.append({
-                    "id": f"NO_LOG_{h.hospital_id}",
-                    "hospital_id": h.hospital_id,
-                    "hospital_name": h.display_name,
-                    "hospital_code": h.hospital_code,
-                    "data_type": "N/A",
-                    "received_at": None,
-                    "expected_at": None,
-                    "delay_minutes": 0,
-                    "record_count": 0,
-                    "data_size_mb": 0.0,
-                    "response_time_ms": 0,
-                    "status": "UNKNOWN",
-                    "integration_status": "UNKNOWN",
-                    "error_message": None,
-                    "created_at": None,
-                    "trend_points": [],
-                    "health_trend_points": []
-                })
-                unknown_count += 1
-            else:
-                log_data = DataIngestionLogSerializer(latest_log).data
-                st = log_data.get('integration_status', 'UNKNOWN')
-                if st == 'RECEIVING':
-                    receiving_count += 1
-                elif st == 'DELAYED':
-                    delayed_count += 1
-                elif st == 'FAILED':
-                    failed_count += 1
-                else:
-                    unknown_count += 1
-
-                log_data['trend_points'] = trend_points
-                log_data['health_trend_points'] = health_trend_points
-                hospital_ingestion_list.append(log_data)
-
-        agg = logs_qs.aggregate(
-            total_records=Sum('record_count'),
-            total_volume=Sum('data_size_mb'),
-            avg_resp=Avg('response_time_ms')
-        )
-
-        last_successful = logs_qs.filter(status='SUCCESS').order_by('-received_at').first()
-
-        issues_qs = logs_qs.filter(
-            Q(status__in=['FAILED', 'ERROR']) | ~Q(error_message__isnull=True) & ~Q(error_message='')
-        ).order_by('-received_at')[:20]
-        issues_data = DataIngestionLogSerializer(issues_qs, many=True).data
-
-        recent_qs = logs_qs.order_by('-received_at')[:20]
-        recent_data = DataIngestionLogSerializer(recent_qs, many=True).data
-
-        return Response({
-            "success": True,
-            "data": hospital_ingestion_list,
-            "summary": {
-                "total_hospitals": total_hospitals,
-                "receiving": receiving_count,
-                "delayed": delayed_count,
-                "failed": failed_count,
-                "unknown": unknown_count,
-                "total_records": agg['total_records'] or 0,
-                "total_volume_mb": round(agg['total_volume'] or 0.0, 2),
-                "average_response_time_ms": int(agg['avg_resp'] or 0),
-                "last_successful_ingestion": last_successful.received_at.isoformat() if last_successful and last_successful.received_at else None
-            },
-            "issues": issues_data,
-            "recent_activity": recent_data
-        }, status=status.HTTP_200_OK)
+        result = get_live_integration_health(filters)
+        return Response(result, status=status.HTTP_200_OK)
 
 
 class IntegrationTrendView(APIView):

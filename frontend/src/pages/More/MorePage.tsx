@@ -1,36 +1,25 @@
 import React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Card } from '../../components/common/Card';
 import {
-  User,
-  Users,
-  ShieldCheck,
   Bell,
-  Info,
+  RefreshCw,
   HelpCircle,
-  LogOut,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  Coins
 } from 'lucide-react';
 
 export const MorePage: React.FC = () => {
-  const navigate = useNavigate();
-
   const menuGroups = [
-    {
-      title: 'ACCOUNT & SECURITY',
-      items: [
-        { name: 'My Administrator Profile', path: '/profile', icon: User, desc: 'Personal details, avatar, API tokens & security preferences' },
-        { name: 'User Management', path: '/user-management', icon: Users, desc: 'Manage system operators, hospital coordinators & access levels' },
-        { name: 'Role & Permission Controls', path: '/role-management', icon: ShieldCheck, desc: 'RBAC policies, AWS ingestion privileges & audit logs' },
-      ]
-    },
     {
       title: 'SYSTEM CONFIGURATION',
       items: [
+        { name: 'AWS Cost & Infrastructure Telemetry', path: '/aws-costs', icon: Coins, desc: 'Hourly burn rates, service expenditures, running EC2/RDS/Lambda & DB health' },
         { name: 'Notification & Escalation Settings', path: '/notification-settings', icon: Bell, desc: 'SMS, WhatsApp, Email & Slack alert triggers' },
-        { name: 'About IBHAR System', path: '/about', icon: Info, desc: 'Version 4.2.0 • AWS ap-south-1 cluster architecture' },
+        { name: 'Refresh Settings', path: '/refresh-settings', icon: RefreshCw, desc: 'Configure dynamic live telemetry sync frequency (5m - 120m)' },
+        { name: 'Hospital Refresh Rate', path: '/hospital-refresh-rate', icon: Sparkles, desc: 'Customize healthy, delayed & critical conditional thresholds per hospital' },
         { name: 'Help & Knowledge Support', path: '/help-support', icon: HelpCircle, desc: 'Troubleshooting connector setups, HL7 format docs & support desk' },
       ]
     }
@@ -88,28 +77,6 @@ export const MorePage: React.FC = () => {
           </div>
         </div>
       ))}
-
-      {/* Logout Action Card */}
-      <Card
-        onClick={() => navigate('/login')}
-        hoverEffect={true}
-        className="flex items-center justify-between p-4 bg-nude-peachTint/50 dark:bg-night-cardElevated/50 border-[#D98F9B]/30 dark:border-[#D99AA5]/30 cursor-pointer"
-      >
-        <div className="flex items-center gap-3.5">
-          <div className="p-2.5 rounded-2xl bg-[#D98F9B]/20 text-[#8E3B49] dark:text-[#D99AA5]">
-            <LogOut className="w-5 h-5" />
-          </div>
-          <div>
-            <h4 className="font-heading font-bold text-sm text-[#8E3B49] dark:text-[#D99AA5]">
-              Log Out of IBHAR Session
-            </h4>
-            <p className="text-xs text-textLight-secondary dark:text-textNight-secondary">
-              Securely sign out administrator account
-            </p>
-          </div>
-        </div>
-        <ChevronRight className="w-4 h-4 text-[#8E3B49] dark:text-[#D99AA5]" />
-      </Card>
     </motion.div>
   );
 };

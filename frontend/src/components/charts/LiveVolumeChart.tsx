@@ -28,10 +28,16 @@ export const LiveVolumeChart: React.FC = () => {
     );
   }
 
+  const formatCount = (val: number) => {
+    if (val >= 1000000) return `${(val / 1000000).toFixed(1)}M`;
+    if (val >= 1000) return `${(val / 1000).toFixed(0)}k`;
+    return `${val}`;
+  };
+
   return (
     <div className="w-full h-64">
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={timeSeries} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+        <AreaChart data={timeSeries} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
           <defs>
             <linearGradient id="liveVolumeGrad" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor={strokeColor} stopOpacity={0.45} />
@@ -52,23 +58,25 @@ export const LiveVolumeChart: React.FC = () => {
             axisLine={false}
             tickLine={false}
             tick={{ fill: textColor, fontSize: 11, fontWeight: 'bold' }}
-            unit=" MB"
+            tickFormatter={formatCount}
+            unit=" rows"
           />
 
           <Tooltip
             content={({ active, payload, label }) => {
               if (active && payload && payload.length) {
+                const countVal = Number(payload[0].value ?? 0);
                 return (
                   <div className="bg-white dark:bg-slate-800 p-3 rounded-2xl border-2 border-slate-200 dark:border-slate-700 shadow-xl text-xs font-bold">
                     <p className="font-heading font-black text-slate-900 dark:text-white mb-1">
-                      {label} Telemetry
+                      {label} Telemetry Sync
                     </p>
                     <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-extrabold">
-                      <span>Data Volume:</span>
-                      <span className="font-mono text-sm font-black">{payload[0].value} MB</span>
+                      <span>Ingested Records:</span>
+                      <span className="font-mono text-sm font-black">{countVal.toLocaleString()} rows</span>
                     </div>
                     <p className="text-[11px] text-slate-500 font-bold mt-1">
-                      Expected sync interval: 30 min
+                      Live API Payload Stream
                     </p>
                   </div>
                 );

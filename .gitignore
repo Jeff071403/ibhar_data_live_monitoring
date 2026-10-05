@@ -2,19 +2,32 @@
 Ibhar Live Monitoring/
 
 # Node
+node_modules/
 frontend/node_modules/
 frontend/dist/
 frontend/dist-ssr/
 frontend/*.local
 
 # Python/Django
+**/__pycache__/
+*.py[cod]
+*$py.class
 backend/venv/
 backend/.venv/
-backend/__pycache__/
-backend/*.pyc
-backend/*.pyo
+venv/
+.venv/
 backend/db.sqlite3
+*.sqlite3
+backend/runtime/
+backend/staticfiles/
+staticfiles/
+.env
+.env.*
 backend/.env
+backend/.env.*
+!.env.example
+!backend/.env.example
+!frontend/.env.example
 
 # Logs
 *.log
@@ -32,3 +45,4 @@ lerna-debug.log*
 *.njsproj
 *.sln
 *.sw?
+

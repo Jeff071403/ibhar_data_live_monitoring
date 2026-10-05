@@ -72,6 +72,12 @@ export const HospitalsPage: React.FC = () => {
   const { hospitals } = useMonitoring();
   const [searchParams, setSearchParams] = useSearchParams();
 
+  // DATA SOURCE: Active Live REST Telemetry
+  // To test with mock data instead, uncomment:
+  // const currentHospitals = MOCK_HOSPITALS;
+  const currentHospitals = hospitals;
+
+
   const initialFilter = (searchParams.get('filter') as StatusType | 'all') || 'all';
   const [activeTab, setActiveTab] = useState<StatusType | 'all'>(initialFilter);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -119,16 +125,13 @@ export const HospitalsPage: React.FC = () => {
   };
 
   const tabs: { id: StatusType | 'all'; label: string; count: number }[] = [
-    { id: 'all', label: 'All', count: hospitals.length },
-    { id: 'healthy', label: 'Healthy', count: hospitals.filter(h => h.status === 'healthy').length },
-    { id: 'delayed', label: 'Delayed', count: hospitals.filter(h => h.status === 'delayed').length },
-    { id: 'warning', label: 'Warning', count: hospitals.filter(h => h.status === 'warning').length },
-    { id: 'critical', label: 'Critical', count: hospitals.filter(h => h.status === 'critical').length },
-    { id: 'offline', label: 'Offline', count: hospitals.filter(h => h.status === 'offline').length },
+    { id: 'all', label: 'All', count: currentHospitals.length },
+    { id: 'healthy', label: 'Healthy', count: currentHospitals.filter(h => h.status === 'healthy').length },
+    { id: 'critical', label: 'Issue', count: currentHospitals.filter(h => h.status === 'critical').length },
   ];
 
   const filteredHospitals = useMemo(() => {
-    return hospitals.filter((hospital) => {
+    return currentHospitals.filter((hospital) => {
       if (activeTab !== 'all' && hospital.status !== activeTab) {
         return false;
       }
@@ -137,6 +140,7 @@ export const HospitalsPage: React.FC = () => {
         return (
           hospital.name.toLowerCase().includes(query) ||
           hospital.id.toLowerCase().includes(query) ||
+
           hospital.city.toLowerCase().includes(query)
         );
       }

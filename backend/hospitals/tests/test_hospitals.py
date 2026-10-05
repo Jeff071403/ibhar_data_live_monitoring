@@ -2,13 +2,12 @@ from django.test import TestCase
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
-from .models import Hospital, Encounter, Discharge, DataIngestionLog, Alert
+from hospitals.models import Hospital, Encounter, Discharge, DataIngestionLog, Alert
 
 
 class HospitalAPITestCase(TestCase):
     def setUp(self):
         self.client = APIClient()
-        # Seed test hospital using raw sql or direct model save if managed=False in test db
         Hospital.objects.create(
             hospital_id='HC0001',
             hospital_name='Apollo Hospital, Chennai',

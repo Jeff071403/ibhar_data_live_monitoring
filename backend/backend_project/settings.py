@@ -9,10 +9,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Load environment variables
 load_dotenv(BASE_DIR / '.env')
 
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-default-key-change-it-in-production')
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', os.getenv('SECRET_KEY', 'django-insecure-default-key-change-it-in-production'))
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
+# Cloud Run terminates TLS at the load balancer and forwards over HTTP,
+# so trust the X-Forwarded-Proto header it sets.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()]
+# Cloud Run's own *.run.app domain is always allowed so the service works
+# out of the box; add your custom domain via the ALLOWED_HOSTS env var.
+ALLOWED_HOSTS.append('.run.app')
+
+CSRF_TRUSTED_ORIGINS = [o.strip() for o in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') if o.strip()]
 
 # Application definition
 INSTALLED_APPS = [
@@ -30,11 +39,13 @@ INSTALLED_APPS = [
     
     # Local apps
     'hospitals',
+    'aws_costs',
 ]
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -111,6 +122,12 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STORAGES = {
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage" if not IS_TESTING else "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -131,3 +148,16 @@ SPECTACULAR_SETTINGS = {
 
 # CORS settings
 CORS_ALLOWED_ORIGINS = [orig.strip() for orig in os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173').split(',') if orig.strip()]
+
+# Live Hospital Monitoring External REST API Configuration (loaded from .env)
+LIVE_SYNC_API_URL = os.getenv('LIVE_SYNC_API_URL')
+LIVE_SYNC_USER_CODE = os.getenv('LIVE_SYNC_USER_CODE', '')
+LIVE_SYNC_HOSPITAL_CODES = [c.strip() for c in os.getenv('LIVE_SYNC_HOSPITAL_CODES', '').split(',') if c.strip()]
+LIVE_SYNC_EXPECTED_INTERVAL_MINUTES = int(os.getenv('LIVE_SYNC_EXPECTED_INTERVAL_MINUTES', '30'))
+
+# AWS Cost & Usage Dashboard Settings
+AWS_COST_MODE = os.getenv('AWS_COST_MODE', 'mock')
+AWS_REGION = os.getenv('AWS_REGION', 'ap-south-1')
+AWS_COST_CACHE_TTL_HOURLY = int(os.getenv('AWS_COST_CACHE_TTL_HOURLY', '900'))
+AWS_COST_CACHE_TTL_DAILY = int(os.getenv('AWS_COST_CACHE_TTL_DAILY', '21600'))
+AWS_COST_RDS_INSTANCE_ID = os.getenv('AWS_COST_RDS_INSTANCE_ID', '')
