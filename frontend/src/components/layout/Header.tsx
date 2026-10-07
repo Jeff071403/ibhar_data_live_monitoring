@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Bell, RefreshCw, User } from 'lucide-react';
+import { Bell, RefreshCw, User, AlertTriangle } from 'lucide-react';
 import { ThemeToggle } from '../common/ThemeToggle';
 import { TimeFilter } from '../common/TimeFilter';
 import { useMonitoring } from '../../hooks/useMonitoring';
+import { triggerTestEmergencyAlert } from '../alerts/EmergencyAlertModal';
+import ibharLogo from '../../assets/IbharLogo.avif';
 
 export const Header: React.FC = () => {
   const {
@@ -17,6 +19,30 @@ export const Header: React.FC = () => {
   } = useMonitoring();
 
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [showTestBtn, setShowTestBtn] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('ibhar_show_emergency_test_btn');
+      return saved !== 'false';
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    const handleStorageChange = () => {
+      try {
+        const saved = localStorage.getItem('ibhar_show_emergency_test_btn');
+        setShowTestBtn(saved !== 'false');
+      } catch {}
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('emergency-test-btn-setting-changed', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('emergency-test-btn-setting-changed', handleStorageChange);
+    };
+  }, []);
 
   return (
     <header className="sticky top-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b-2 border-slate-200 dark:border-slate-800 px-4 lg:px-8 py-4 transition-colors duration-300">
@@ -35,13 +61,33 @@ export const Header: React.FC = () => {
             </div>
           </div>
 
-          <h1 className="font-heading font-black text-xl lg:text-2xl text-slate-900 dark:text-white tracking-tight">
-            IBHAR <span className="font-medium text-slate-600 dark:text-slate-400 text-base lg:text-lg">Live Monitoring</span>
-          </h1>
+          <div className="flex items-center gap-3 mt-1">
+            <img
+              src={ibharLogo}
+              alt="Ibhar Logo"
+              className="h-8 md:h-9 w-auto object-contain shrink-0"
+            />
+            <h1 className="font-heading font-medium text-slate-600 dark:text-slate-400 text-lg lg:text-xl tracking-tight leading-normal translate-y-[2px] md:translate-y-[3px]">
+              Live Monitoring
+            </h1>
+          </div>
         </div>
 
         {/* Right Controls */}
         <div className="flex items-center flex-wrap gap-2.5 sm:gap-3.5">
+          {/* Test Emergency Pop-Up Button (Controlled by Settings) */}
+          {showTestBtn && (
+            <button
+              onClick={() => triggerTestEmergencyAlert()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 border-2 border-red-500/30 dark:border-red-500/40 text-xs font-mono font-extrabold shadow-sm hover:shadow-md transition-all cursor-pointer"
+              title="Test Emergency Pop-Up Alert with Siren and Video"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 animate-pulse text-red-500" />
+              <span className="hidden md:inline">Test Emergency Pop-up</span>
+              <span className="md:hidden">Test Alert</span>
+            </button>
+          )}
+
           {/* Time Filter */}
           <TimeFilter />
 

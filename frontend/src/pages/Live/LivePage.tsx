@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useMonitoring } from '../../hooks/useMonitoring';
 import { Card } from '../../components/common/Card';
@@ -16,7 +16,8 @@ import {
   RefreshCw,
   Sparkles,
   Activity,
-  CheckCircle2
+  CheckCircle2,
+  Tv
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -86,6 +87,7 @@ const IngestionSparkline: React.FC<{ points: IntegrationTrendPoint[]; isCritical
 };
 
 export const LivePage: React.FC = () => {
+  const navigate = useNavigate();
   const {
     integrationHealthData,
     lastUpdated,
@@ -93,15 +95,36 @@ export const LivePage: React.FC = () => {
     isSimulatingUpdate
   } = useMonitoring();
 
-  // Page flipping states
+  // Page flipping states (for 4s table records pagination)
   const [currentPage, setCurrentPage] = useState<number>(0);
   const [isAutoFlipping, setIsAutoFlipping] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('ALL');
   const [progress, setProgress] = useState<number>(0);
 
+  // 50s Page Auto-Swap states (between Live and AWS Costs)
+  const [isPageRotating, setIsPageRotating] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('ibhar_auto_page_rotate');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+  const [pageTimeRemaining, setPageTimeRemaining] = useState<number>(50);
+
+  const togglePageRotate = () => {
+    setIsPageRotating(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('ibhar_auto_page_rotate', String(next));
+      } catch (e) {}
+      return next;
+    });
+  };
+
   const ITEMS_PER_PAGE = 7;
-  const FLIP_INTERVAL_MS = 4000;
+  const FLIP_INTERVAL_MS = 7000;
   const PROGRESS_TICK_MS = 50;
 
   // Extract logs from integrationHealthData
@@ -323,6 +346,27 @@ export const LivePage: React.FC = () => {
     }
   }, [totalPages, currentPage]);
 
+  // 50-Second Page Transition Timer (Live -> AWS Costs)
+  useEffect(() => {
+    if (!isPageRotating) return;
+
+    setPageTimeRemaining(50);
+    const startMs = Date.now();
+    const durationMs = 50000;
+
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - startMs;
+      const left = Math.max(0, Math.ceil((durationMs - elapsed) / 1000));
+      setPageTimeRemaining(left);
+      if (left <= 0) {
+        clearInterval(interval);
+        navigate('/aws-costs');
+      }
+    }, 250);
+
+    return () => clearInterval(interval);
+  }, [isPageRotating, navigate]);
+
   // Slice currently displayed 10 hospitals
   const startIndex = currentPage * ITEMS_PER_PAGE;
   const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, sortedHospitals.length);
@@ -335,9 +379,14 @@ export const LivePage: React.FC = () => {
   const totalRowsIngested = useMemo(() => sortedHospitals.reduce((acc, h) => acc + (h.record_count ?? h.records_processed ?? 0), 0), [sortedHospitals]);
 
   return (
-    <div className="w-full max-w-full space-y-4 px-1 sm:px-2 pb-8">
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35 }}
+      className="w-full max-w-full space-y-4 px-1 sm:px-2 pb-8"
+    >
       {/* Top Page Header - TV Bold Design */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 px-1">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 px-1">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-950/80 border border-blue-200 dark:border-blue-800 shadow-sm">
@@ -351,7 +400,7 @@ export const LivePage: React.FC = () => {
             </span>
           </div>
 
-          <h1 className="font-heading font-black text-2xl sm:text-3xl lg:text-4xl text-slate-900 dark:text-white tracking-tight flex items-center gap-3">
+          <h1 className="font-heading font-black text-2xl sm:text-3xl md:text-4xl text-slate-900 dark:text-white tracking-tight flex items-center gap-3">
             LIVE HOSPITAL TELEMETRY STREAM
             <TrendingUp className="w-8 h-8 text-blue-600 dark:text-blue-400" />
           </h1>
@@ -359,10 +408,34 @@ export const LivePage: React.FC = () => {
 
         {/* Action Controls */}
         <div className="flex items-center flex-wrap gap-2.5">
-          {/* Pause / Resume Auto-Flip */}
+          {/* 50s Auto Page Rotator (Live <-> AWS Cost) */}
+          <button
+            onClick={togglePageRotate}
+            title={isPageRotating ? "Auto-transition active: Will switch to AWS Costs after 50s. Click to pause." : "Auto-transition paused. Click to resume."}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all cursor-pointer border-2 shadow-sm ${
+              isPageRotating
+                ? 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-800 hover:bg-indigo-100 ring-2 ring-indigo-400/20'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            <Tv className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            <span>
+              {isPageRotating ? `AWS Costs in ${pageTimeRemaining}s` : 'Page Swap: PAUSED'}
+            </span>
+            {isPageRotating ? (
+              <span className="flex h-2 w-2 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+              </span>
+            ) : (
+              <Play className="w-3.5 h-3.5" />
+            )}
+          </button>
+
+          {/* Pause / Resume Auto-Flip (7s row table pagination) */}
           <button
             onClick={() => setIsAutoFlipping(prev => !prev)}
-            title={isAutoFlipping ? "Pause 4s auto-flip" : "Resume 4s auto-flip"}
+            title={isAutoFlipping ? "Pause 7s table row pagination" : "Resume 7s table row pagination"}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all cursor-pointer border-2 shadow-sm ${
               isAutoFlipping
                 ? 'bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-800 hover:bg-blue-100'
@@ -371,11 +444,11 @@ export const LivePage: React.FC = () => {
           >
             {isAutoFlipping ? (
               <>
-                <Pause className="w-4 h-4" /> <span>Auto-Flip: ON (4s)</span>
+                <Pause className="w-4 h-4" /> <span>Table Flip: 7s</span>
               </>
             ) : (
               <>
-                <Play className="w-4 h-4" /> <span>Auto-Flip: PAUSED</span>
+                <Play className="w-4 h-4" /> <span>Table Flip: PAUSED</span>
               </>
             )}
           </button>
@@ -394,7 +467,7 @@ export const LivePage: React.FC = () => {
       </div>
 
       {/* KPI Status Strip - TV Bold Numbers */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5 sm:gap-3">
         {/* Critical Priority Card */}
         <div
           onClick={() => setSelectedStatusFilter(selectedStatusFilter === 'CRITICAL' ? 'ALL' : 'CRITICAL')}
@@ -600,15 +673,7 @@ export const LivePage: React.FC = () => {
           </div>
         </div>
 
-        {/* 4-second Top Progress Line */}
-        {isAutoFlipping && totalPages > 1 && (
-          <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800">
-            <div
-              className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-blue-600 transition-all duration-75 ease-linear"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-        )}
+
 
         {/* Full-width Responsive Table with ZERO Horizontal Scroll
             Columns are allocated exact needed space to fit 100% screen width right next to the sidebar:
@@ -642,12 +707,12 @@ export const LivePage: React.FC = () => {
               <tr className="border-b-2 border-slate-200 dark:border-slate-800 text-xs sm:text-sm font-black uppercase tracking-wider text-slate-600 dark:text-slate-300 bg-slate-100/95 dark:bg-slate-900/95 select-none">
                 {/* 1. Hospital Code */}
                 <th className="py-3.5 px-2.5 w-[8%]">
-                  Hospital Code
+                  HCcode
                 </th>
 
                 {/* 2. Hospital Name */}
                 <th className="py-3.5 px-2.5 w-[22%]">
-                  Hospital Name
+                  Name
                 </th>
 
                 {/* 3. Last Received */}
@@ -667,12 +732,12 @@ export const LivePage: React.FC = () => {
 
                 {/* 6. Processed Rows */}
                 <th className="py-3.5 px-2.5 w-[8%] text-right">
-                  Processed Rows
+                  Processed
                 </th>
 
                 {/* 7. Process Duration */}
                 <th className="py-3.5 px-2.5 w-[8%] text-right">
-                  Process Duration
+                  Duration
                 </th>
 
                 {/* 8. Data Structure */}
@@ -682,7 +747,7 @@ export const LivePage: React.FC = () => {
 
                 {/* 9. Service Name */}
                 <th className="py-3.5 px-2.5 w-[8%]">
-                  Service Name
+                  Service
                 </th>
 
                 {/* 10. Ingestion Trend Line Graph */}
@@ -919,6 +984,6 @@ export const LivePage: React.FC = () => {
           </div>
         </div>
       </Card>
-    </div>
+    </motion.div>
   );
 };

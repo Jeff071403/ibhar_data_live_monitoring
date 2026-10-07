@@ -14,7 +14,7 @@ export const BottomNav: React.FC = () => {
   ];
 
   return (
-    <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-nude-card/95 dark:bg-night-card/95 backdrop-blur-md border-t border-[#EFE4DC] dark:border-[#102437] px-3 py-2">
+    <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-nude-card/95 dark:bg-night-card/95 backdrop-blur-md border-t border-[#EFE4DC] dark:border-[#102437] px-3 py-2">
       <div className="flex items-center justify-around">
         {mobileItems.map((item) => {
           const Icon = item.icon;

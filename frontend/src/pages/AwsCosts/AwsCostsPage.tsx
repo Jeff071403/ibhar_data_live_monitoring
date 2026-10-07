@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import {
   Coins,
   TrendingUp,
@@ -6,7 +8,9 @@ import {
   ExternalLink,
   AlertTriangle,
   Clock,
-  Zap
+  Zap,
+  Play,
+  Tv
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -23,6 +27,7 @@ import {
 import { apiService } from '../../services/api';
 
 export const AwsCostsPage: React.FC = () => {
+  const navigate = useNavigate();
   const [summary, setSummary] = useState<any>(null);
   const [hourlyData, setHourlyData] = useState<any[]>([]);
   const [dailyData, setDailyData] = useState<any[]>([]);
@@ -31,6 +36,78 @@ export const AwsCostsPage: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // 10s Page Auto-Swap states (between AWS Costs and Live)
+  const [isPageRotating, setIsPageRotating] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('ibhar_auto_page_rotate');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+  const [pageTimeRemaining, setPageTimeRemaining] = useState<number>(10);
+
+  // Dynamic Month-to-Date Budget Target (configured dynamically via Settings)
+  const [customBudget, setCustomBudget] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('ibhar_aws_monthly_budget');
+      return saved ? parseFloat(saved) : 2800;
+    } catch {
+      return 2800;
+    }
+  });
+
+  useEffect(() => {
+    const handleBudgetChange = () => {
+      try {
+        const saved = localStorage.getItem('ibhar_aws_monthly_budget');
+        if (saved) {
+          const val = parseFloat(saved);
+          if (!isNaN(val) && val > 0) {
+            setCustomBudget(val);
+          }
+        }
+      } catch {}
+    };
+    window.addEventListener('aws-budget-setting-changed', handleBudgetChange);
+    window.addEventListener('storage', handleBudgetChange);
+    return () => {
+      window.removeEventListener('aws-budget-setting-changed', handleBudgetChange);
+      window.removeEventListener('storage', handleBudgetChange);
+    };
+  }, []);
+
+  const togglePageRotate = () => {
+    setIsPageRotating(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('ibhar_auto_page_rotate', String(next));
+      } catch (e) {}
+      return next;
+    });
+  };
+
+  // 10-Second Page Transition Timer (AWS Costs -> Live)
+  useEffect(() => {
+    if (!isPageRotating) return;
+
+    setPageTimeRemaining(10);
+    const startMs = Date.now();
+    const durationMs = 10000;
+
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - startMs;
+      const left = Math.max(0, Math.ceil((durationMs - elapsed) / 1000));
+      setPageTimeRemaining(left);
+      if (left <= 0) {
+        clearInterval(interval);
+        navigate('/live');
+      }
+    }, 250);
+
+    return () => clearInterval(interval);
+  }, [isPageRotating, navigate]);
 
   const fetchDashboardData = async () => {
     try {
@@ -131,9 +208,18 @@ export const AwsCostsPage: React.FC = () => {
 
   const isMock = summary?.is_mock ?? true;
   const healthStatus = (summary?.integration_health || 'healthy').toLowerCase();
+  const effectiveBudget = customBudget || summary?.budget_limit || 2800;
+  const mtdCost = Number(summary?.mtd_cost ?? 412.50);
+  const budgetUsedPercent = Number(((mtdCost / effectiveBudget) * 100).toFixed(1));
+  const forecastCost = Number(summary?.forecast_cost ?? 2450.00);
 
   return (
-    <div className="space-y-6 pb-12">
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35 }}
+      className="space-y-6 pb-12"
+    >
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 p-5 rounded-2xl shadow-sm">
         <div className="flex items-center gap-3.5">
@@ -161,7 +247,31 @@ export const AwsCostsPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5 self-start sm:self-auto">
+        <div className="flex items-center flex-wrap gap-2.5 self-start sm:self-auto">
+          {/* 10s Auto Page Rotator (AWS Cost <-> Live) */}
+          <button
+            onClick={togglePageRotate}
+            title={isPageRotating ? "Auto-transition active: Will switch back to Live Monitoring after 10s. Click to pause." : "Auto-transition paused. Click to resume."}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer border shadow-sm ${
+              isPageRotating
+                ? 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-800 hover:bg-indigo-100 ring-2 ring-indigo-400/20'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            <Tv className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+            <span>
+              {isPageRotating ? `Live Stream in ${pageTimeRemaining}s` : 'Page Swap: PAUSED'}
+            </span>
+            {isPageRotating ? (
+              <span className="flex h-2 w-2 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+              </span>
+            ) : (
+              <Play className="w-3 h-3" />
+            )}
+          </button>
+
           {/* External Wall Display Link */}
           <a
             href="http://localhost:8000/aws-costs/"
@@ -177,7 +287,7 @@ export const AwsCostsPage: React.FC = () => {
           <button
             onClick={handleManualRefresh}
             disabled={isRefreshing}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-extrabold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-all"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-extrabold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer shadow-sm"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
             <span>{lastUpdated ? `Updated ${lastUpdated}` : 'Refresh'}</span>
@@ -194,7 +304,7 @@ export const AwsCostsPage: React.FC = () => {
       )}
 
       {/* KPI Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4">
         {/* KPI 1: Hourly Burn */}
         <div className="bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between text-xs font-extrabold text-slate-500 dark:text-slate-400 mb-2">
@@ -232,23 +342,44 @@ export const AwsCostsPage: React.FC = () => {
         <div className="bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between text-xs font-extrabold text-slate-500 dark:text-slate-400 mb-2">
             <span>MONTH-TO-DATE</span>
-            <Coins className="w-4 h-4 text-emerald-500" />
+            <button
+              onClick={() => navigate('/notification-settings')}
+              title="Configure Dynamic Monthly Budget in Settings"
+              className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 text-emerald-500 transition-colors cursor-pointer"
+            >
+              <Coins className="w-4 h-4" />
+            </button>
           </div>
           <div className="flex items-baseline gap-1 my-1">
             <span className="text-2xl font-black text-slate-900 dark:text-white font-mono">
-              ${Number(summary?.mtd_cost ?? 412.50).toFixed(2)}
+              ${mtdCost.toFixed(2)}
             </span>
           </div>
           <div>
             <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden mb-1">
               <div
-                className="bg-emerald-500 h-full rounded-full transition-all"
-                style={{ width: `${Math.min(100, Number(summary?.budget_used_percent ?? 16))}%` }}
+                className={`h-full rounded-full transition-all duration-500 ${
+                  budgetUsedPercent > 100
+                    ? 'bg-rose-500'
+                    : budgetUsedPercent > 80
+                    ? 'bg-amber-500'
+                    : 'bg-emerald-500'
+                }`}
+                style={{ width: `${Math.min(100, budgetUsedPercent)}%` }}
               />
             </div>
-            <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
-              {summary?.budget_used_percent ?? 16}% of ${summary?.budget_limit ?? 2500} budget
-            </p>
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                {budgetUsedPercent}% of ${effectiveBudget.toLocaleString()} budget
+              </p>
+              <button
+                onClick={() => navigate('/notification-settings')}
+                className="text-[9px] font-bold text-indigo-500 hover:text-indigo-600 underline cursor-pointer"
+                title="Edit dynamic monthly budget in settings"
+              >
+                Edit
+              </button>
+            </div>
           </div>
         </div>
 
@@ -256,15 +387,15 @@ export const AwsCostsPage: React.FC = () => {
         <div className="bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between text-xs font-extrabold text-slate-500 dark:text-slate-400 mb-2">
             <span>FORECAST</span>
-            <TrendingUp className="w-4 h-4 text-purple-500" />
+            <TrendingUp className={`w-4 h-4 ${forecastCost > effectiveBudget ? 'text-rose-500' : 'text-purple-500'}`} />
           </div>
           <div className="flex items-baseline gap-1 my-1">
-            <span className="text-2xl font-black text-slate-900 dark:text-white font-mono">
-              ${Number(summary?.forecast_cost ?? 2450.00).toFixed(2)}
+            <span className={`text-2xl font-black font-mono ${forecastCost > effectiveBudget ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'}`}>
+              ${forecastCost.toFixed(2)}
             </span>
           </div>
           <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
-            Target: &lt; ${summary?.budget_limit ?? 2500}
+            Target: &lt; ${effectiveBudget.toLocaleString()}
           </p>
         </div>
 
@@ -307,9 +438,9 @@ export const AwsCostsPage: React.FC = () => {
       </div>
 
       {/* Main Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Hourly Cost Timeline (2 Cols) - Line Graph */}
-        <div className="lg:col-span-2 bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+        <div className="md:col-span-2 bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
           <div className="flex items-center justify-between mb-2">
             <div>
               <h2 className="text-base font-extrabold text-slate-900 dark:text-white">
@@ -606,7 +737,7 @@ export const AwsCostsPage: React.FC = () => {
           </table>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };
 

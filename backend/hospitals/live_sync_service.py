@@ -15,7 +15,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL_MINUTES = 30
-HISTORY_RETENTION_DAYS = 7
+HISTORY_RETENTION_DAYS = 20
 
 
 def get_config():
@@ -689,61 +689,9 @@ def get_live_integration_health(filters: Optional[Dict[str, Any]] = None) -> Dic
     search_target = search_param.lower().strip() if (search_param and search_param.strip()) else None
     h_code_target = hospital_id_param.strip().lower() if (hospital_id_param and hospital_id_param != "ALL") else None
 
-    filtered_records: List[Dict[str, Any]] = []
-
-    for r in raw_records:
-        h_code = str(r.get("HospitalCode") or "").strip()
-        h_name = str(r.get("HospitalName") or "").strip()
-        ds_name = str(r.get("DataStructureName") or "").strip()
-        service_name = str(r.get("ServiceName") or "").strip()
-        proc_status = str(r.get("ProcessStatus") or "").strip().upper()
-        start_time_str = r.get("StartTime") or r.get("EventDate") or ""
-
-        # 1. Hospital Code Filter
-        if h_code_target and h_code.lower() != h_code_target:
-            continue
-
-        # 2. Data Structure Filter
-        if ds_target:
-            ds_norm = ds_name.lower().replace("_", "").replace(" ", "")
-            if ds_norm != ds_target:
-                continue
-
-        # 3. Service Name Filter
-        if service_target:
-            if service_target not in service_name.lower():
-                continue
-
-        # 4. Status Filter
-        if status_target:
-            if status_target == "SUCCESS" and proc_status not in ["SUCCESS", "RECEIVING"]:
-                continue
-            elif status_target == "ERROR" and proc_status not in ["ERROR", "FAILED", "CRITICAL"]:
-                continue
-
-        # 5. Date Filter
-        if start_date or end_date:
-            date_part = start_time_str[:10] if len(start_time_str) >= 10 else ""
-            if start_date and date_part and date_part < start_date:
-                continue
-            if end_date and date_part and date_part > end_date:
-                continue
-
-        # 6. Search Bar Filter
-        if search_target:
-            if (
-                search_target not in h_code.lower()
-                and search_target not in h_name.lower()
-                and search_target not in ds_name.lower()
-                and search_target not in service_name.lower()
-            ):
-                continue
-
-        filtered_records.append(r)
-
-    # Group by HospitalCode to form ingestion node rows
+    # Group ALL raw records by HospitalCode to maintain full hospital catalog
     grouped_by_hospital: Dict[str, List[Dict[str, Any]]] = {}
-    for r in filtered_records:
+    for r in raw_records:
         code = str(r.get("HospitalCode") or "UNKNOWN").strip()
         grouped_by_hospital.setdefault(code, []).append(r)
 
@@ -761,25 +709,77 @@ def get_live_integration_health(filters: Optional[Dict[str, Any]] = None) -> Dic
 
     now = timezone.now()
 
-    for h_code, h_recs in grouped_by_hospital.items():
-        # Sort by StartTime descending to find latest
-        h_recs.sort(key=lambda x: str(x.get("StartTime") or ""), reverse=True)
-        latest_rec = h_recs[0]
-        h_name = str(latest_rec.get("HospitalName") or h_code).strip()
+    for h_code, all_h_recs in grouped_by_hospital.items():
+        # 1. Hospital Code Target Filter
+        if h_code_target and h_code.lower() != h_code_target:
+            continue
 
-        # Check errors & status across records
-        has_error = any(
-            str(r.get("ProcessStatus") or "").upper() == "ERROR" or bool(str(r.get("ErrorText") or "").strip())
-            for r in h_recs
-        )
+        # Sort all historical records by StartTime descending
+        all_h_recs.sort(key=lambda x: str(x.get("StartTime") or ""), reverse=True)
+        fallback_latest_rec = all_h_recs[0]
+        h_name = str(fallback_latest_rec.get("HospitalName") or h_code).strip()
 
-        h_proc = sum(int(r.get("RecordsProcessed") or 0) for r in h_recs)
-        h_avail = sum(int(r.get("RecordsAvailable") or 0) for r in h_recs)
+        # 2. Search Target Filter
+        if search_target:
+            has_search_match = any(
+                search_target in h_code.lower()
+                or search_target in h_name.lower()
+                or search_target in str(r.get("DataStructureName") or "").lower()
+                or search_target in str(r.get("ServiceName") or "").lower()
+                for r in all_h_recs
+            )
+            if not has_search_match:
+                continue
+
+        # 3. Filter records for data structure & service name if specified
+        structure_matched_recs = all_h_recs
+        if ds_target:
+            structure_matched_recs = [
+                r for r in structure_matched_recs
+                if str(r.get("DataStructureName") or "").lower().replace("_", "").replace(" ", "") == ds_target
+            ]
+        if service_target:
+            structure_matched_recs = [
+                r for r in structure_matched_recs
+                if service_target in str(r.get("ServiceName") or "").lower()
+            ]
+
+        # 4. Filter records for selected Date Window (e.g. Today)
+        date_matched_recs = []
+        for r in structure_matched_recs:
+            start_time_str = r.get("StartTime") or r.get("EventDate") or ""
+            date_part = start_time_str[:10] if len(start_time_str) >= 10 else ""
+            if start_date and date_part and date_part < start_date:
+                continue
+            if end_date and date_part and date_part > end_date:
+                continue
+            date_matched_recs.append(r)
+
+        # Decide active record set & volume
+        if date_matched_recs:
+            active_recs = date_matched_recs
+            latest_rec = date_matched_recs[0]
+            h_proc = sum(int(r.get("RecordsProcessed") or 0) for r in date_matched_recs)
+            h_avail = sum(int(r.get("RecordsAvailable") or 0) for r in date_matched_recs)
+        else:
+            # Hospital hasn't synced in the selected date window (e.g. today):
+            # Retain in dashboard as Delayed / Needs Sync using its latest known state
+            active_recs = structure_matched_recs if structure_matched_recs else all_h_recs
+            latest_rec = active_recs[0]
+            h_proc = 0
+            h_avail = 0
+
         total_records_sum += h_proc
         h_vol = round(h_proc * 0.018, 2)
         total_volume_sum += h_vol
 
-        # Compute delay from latest sync
+        # Check errors across active records
+        has_error = any(
+            str(r.get("ProcessStatus") or "").upper() == "ERROR" or bool(str(r.get("ErrorText") or "").strip())
+            for r in active_recs
+        )
+
+        # Compute delay from latest known sync timestamp
         latest_time_str = latest_rec.get("StartTime") or latest_rec.get("EndTime")
         parsed_latest_dt = parse_sync_timestamp(latest_time_str)
 
@@ -788,22 +788,31 @@ def get_live_integration_health(filters: Optional[Dict[str, Any]] = None) -> Dic
             delta = (now - parsed_latest_dt).total_seconds() / 60.0
             delay_minutes = max(0, int(delta))
 
-        # Ingestion status
+        # Ingestion status badge
         if has_error or str(latest_rec.get("ProcessStatus") or "").upper() == "ERROR":
             st_badge = "FAILED"
             failed_count += 1
-        elif delay_minutes > 30:
+        elif delay_minutes > 30 or not date_matched_recs:
             st_badge = "DELAYED"
             delayed_count += 1
         elif str(latest_rec.get("ProcessStatus") or "").upper() == "SUCCESS" or h_proc > 0:
             st_badge = "RECEIVING"
             receiving_count += 1
         else:
-            st_badge = "RECEIVING"
-            receiving_count += 1
+            st_badge = "DELAYED"
+            delayed_count += 1
+
+        # Apply Status Filter if specified
+        if status_target:
+            if status_target == "SUCCESS" and st_badge != "RECEIVING":
+                continue
+            elif status_target == "ERROR" and st_badge != "FAILED":
+                continue
+            elif status_target == "DELAYED" and st_badge != "DELAYED":
+                continue
 
         # Track latest successful sync
-        for r in h_recs:
+        for r in all_h_recs:
             if str(r.get("ProcessStatus") or "").upper() == "SUCCESS":
                 dt = parse_sync_timestamp(r.get("StartTime"))
                 if dt and (latest_success_dt is None or dt > latest_success_dt):
@@ -812,7 +821,7 @@ def get_live_integration_health(filters: Optional[Dict[str, Any]] = None) -> Dic
 
         # Ingestion sparkline trend points (last 10 records)
         trend_points = []
-        for r in reversed(h_recs[:10]):
+        for r in reversed(all_h_recs[:10]):
             r_dt = parse_sync_timestamp(r.get("StartTime"))
             t_label = r_dt.strftime("%H:%M") if r_dt else "Time"
             rec_c = int(r.get("RecordsProcessed") or 0)
@@ -826,14 +835,14 @@ def get_live_integration_health(filters: Optional[Dict[str, Any]] = None) -> Dic
 
         # Proactive health trend sparkline
         health_trend_points = []
-        for r in reversed(h_recs[:10]):
+        for r in reversed(all_h_recs[:10]):
             r_dt = parse_sync_timestamp(r.get("StartTime"))
             t_label = r_dt.strftime("%H:%M") if r_dt else "Time"
             p_st = str(r.get("ProcessStatus") or "").upper()
             err_t = str(r.get("ErrorText") or "").strip()
-            issues_list = []
+            issues_sub_list = []
             if p_st == "ERROR" or err_t:
-                issues_list.append({
+                issues_sub_list.append({
                     "type": "CONNECTION",
                     "severity": "CRITICAL",
                     "value": "Error Encountered",
@@ -854,12 +863,12 @@ def get_live_integration_health(filters: Optional[Dict[str, Any]] = None) -> Dic
                 "response_time_ms": 75,
                 "record_count": int(r.get("RecordsProcessed") or 0),
                 "data_size_mb": round(int(r.get("RecordsProcessed") or 0) * 0.018, 2),
-                "issues": issues_list
+                "issues": issues_sub_list
             })
 
         err_msg = latest_rec.get("ErrorText") or None
         if not err_msg:
-            for r in h_recs:
+            for r in active_recs:
                 if r.get("ErrorText"):
                     err_msg = r.get("ErrorText")
                     break
@@ -903,9 +912,9 @@ def get_live_integration_health(filters: Optional[Dict[str, Any]] = None) -> Dic
     # Sort hospital list alphabetically
     hospital_ingestion_list.sort(key=lambda x: x["hospital_name"])
 
-    # Extract all live errors from the filtered dataset
+    # Extract all live errors from the dataset
     issues_list = []
-    for r in filtered_records:
+    for r in raw_records:
         p_st = str(r.get("ProcessStatus") or "").upper()
         err_t = str(r.get("ErrorText") or "").strip()
         if p_st == "ERROR" or (err_t and err_t.lower() != "null"):
@@ -927,23 +936,22 @@ def get_live_integration_health(filters: Optional[Dict[str, Any]] = None) -> Dic
                 "error_message": err_t or "ProcessStatus ERROR returned by external sync connector."
             })
 
-    general_records_sum = sum(int(r.get("RecordsProcessed") or 0) for r in filtered_records if "GENERAL" in str(r.get("ServiceName") or "").upper())
-    vamr_records_sum = sum(int(r.get("RecordsProcessed") or 0) for r in filtered_records if "VAMR" in str(r.get("ServiceName") or "").upper())
-    general_entities_count = sum(1 for r in filtered_records if "GENERAL" in str(r.get("ServiceName") or "").upper())
-    vamr_entities_count = sum(1 for r in filtered_records if "VAMR" in str(r.get("ServiceName") or "").upper())
+    general_records_sum = sum(int(r.get("RecordsProcessed") or 0) for r in raw_records if "GENERAL" in str(r.get("ServiceName") or "").upper())
+    vamr_records_sum = sum(int(r.get("RecordsProcessed") or 0) for r in raw_records if "VAMR" in str(r.get("ServiceName") or "").upper())
+    general_entities_count = sum(1 for r in raw_records if "GENERAL" in str(r.get("ServiceName") or "").upper())
+    vamr_entities_count = sum(1 for r in raw_records if "VAMR" in str(r.get("ServiceName") or "").upper())
 
     # Calculate average process execution duration in seconds
     all_durations = []
-    for r in filtered_records:
+    for r in raw_records:
         rs_dt = parse_sync_timestamp(r.get("StartTime"))
         re_dt = parse_sync_timestamp(r.get("EndTime"))
         if rs_dt and re_dt and re_dt >= rs_dt:
             all_durations.append((re_dt - rs_dt).total_seconds())
     avg_duration_sec = round(sum(all_durations) / len(all_durations), 2) if all_durations else 0.08
 
-    # Find earliest and latest process execution timestamp across current dataset
-    latest_proc_start = filtered_records[0].get("StartTime") if filtered_records else None
-    latest_proc_end = filtered_records[0].get("EndTime") if filtered_records else None
+    latest_proc_start = raw_records[0].get("StartTime") if raw_records else None
+    latest_proc_end = raw_records[0].get("EndTime") if raw_records else None
 
     avg_resp = int(total_latency_sum / latency_records_count) if latency_records_count > 0 else 75
 

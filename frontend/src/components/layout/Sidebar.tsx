@@ -9,11 +9,11 @@ import {
   GitCompare,
   Settings,
   Activity,
-  Sparkles,
   TrendingUp,
   Coins
 } from 'lucide-react';
 import { useMonitoring } from '../../hooks/useMonitoring';
+import ibharLogo from '../../assets/IbharLogo.avif';
 
 interface NavItem {
   name: string;
@@ -52,7 +52,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isExpanded, setIsExpanded }) =
     <aside
       onMouseEnter={() => setIsExpanded(true)}
       onMouseLeave={() => setIsExpanded(false)}
-      className={`hidden lg:flex flex-col fixed left-0 top-0 bottom-0 z-40 bg-white dark:bg-slate-900 border-r-2 border-slate-200 dark:border-slate-800 shadow-xl shadow-slate-200/40 dark:shadow-black/50 transition-all duration-300 ease-in-out ${
+      className={`hidden md:flex flex-col fixed left-0 top-0 bottom-0 z-40 bg-white dark:bg-slate-900 border-r-2 border-slate-200 dark:border-slate-800 shadow-xl shadow-slate-200/40 dark:shadow-black/50 transition-all duration-300 ease-in-out ${
         isExpanded ? 'w-64 p-5' : 'w-20 p-3'
       }`}
     >
@@ -66,12 +66,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isExpanded, setIsExpanded }) =
           {isExpanded && (
             <div className="whitespace-nowrap transition-opacity duration-200">
               <div className="flex items-center gap-1">
-                <span className="font-heading font-black text-lg text-slate-900 dark:text-white tracking-tight">
-                  IBHAR
-                </span>
-                <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <img
+                  src={ibharLogo}
+                  alt="Ibhar Logo"
+                  className="h-6 w-auto object-contain shrink-0"
+                />
               </div>
-              <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-500 dark:text-slate-400">
+              <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-500 dark:text-slate-400 mt-0.5">
                 Live Monitoring
               </p>
             </div>
@@ -79,8 +80,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isExpanded, setIsExpanded }) =
         </div>
       </div>
 
-      {/* Navigation List */}
-      <nav className="flex-1 space-y-2 overflow-y-auto overflow-x-hidden py-1">
+      {/* Navigation List - Smooth scrollable without visible scrollbar */}
+      <nav className="flex-1 space-y-2 overflow-y-auto overflow-x-hidden py-1 scrollbar-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         {navItems.map((item) => {
           const Icon = item.icon;
           return (
