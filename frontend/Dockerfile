@@ -15,7 +15,7 @@ COPY . .
 #   --build-arg VITE_API_BASE_URL=https://ibhar-backend-xxxxx.a.run.app/api
 ARG VITE_API_BASE_URL=/api
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
-RUN npm run build
+RUN npx vite build
 
 # ---- Runtime stage ------------------------------------------------------
 FROM nginx:1.27-alpine AS runtime
