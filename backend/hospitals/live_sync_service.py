@@ -635,7 +635,7 @@ def get_cached_raw_records(ttl_seconds: int = 60, force_refresh: bool = False) -
         if age < ttl_seconds:
             return True, _LIVE_RECORDS_CACHE["records"], None
 
-    ok, raw_records, err = fetch_hospital_sync_details(hospital_code=None, timeout=20)
+    ok, raw_records, err = fetch_hospital_sync_details(hospital_code=None, timeout=60)
     if ok and raw_records:
         _LIVE_RECORDS_CACHE["timestamp"] = now
         _LIVE_RECORDS_CACHE["records"] = raw_records

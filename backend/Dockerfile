@@ -35,4 +35,4 @@ CMD python manage.py migrate --noinput && \
         --bind 0.0.0.0:${PORT} \
         --workers 2 \
         --threads 4 \
-        --timeout 60
+        --timeout 180
