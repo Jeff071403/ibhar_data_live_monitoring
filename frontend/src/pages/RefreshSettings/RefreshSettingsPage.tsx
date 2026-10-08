@@ -85,6 +85,13 @@ export const RefreshSettingsPage: React.FC = () => {
       description: 'Hourly snapshot cadence for administrative overview and high-level health tracking.',
     },
     {
+      minutes: 90,
+      label: '90 Minutes',
+      sublabel: '1.5 Hours',
+      badge: 'Extended',
+      description: 'Extended multi-cycle sync cadence for balanced throughput across high-volume pipelines.',
+    },
+    {
       minutes: 120,
       label: '120 Minutes',
       sublabel: '2 Hours',

@@ -6,8 +6,7 @@ import {
   CheckCircle2,
   Search,
   RotateCcw,
-  Filter,
-  Info
+  Filter
 } from 'lucide-react';
 import { useMonitoring } from '../../hooks/useMonitoring';
 
@@ -88,6 +87,49 @@ export const HospitalRefreshRatePage: React.FC = () => {
     });
   }, [hospitalList, searchQuery, filterCustomOnly, thresholdOverrides]);
 
+  const handleUpdateGlobalThreshold = (
+    field: keyof HospitalThresholdConfig,
+    value: number
+  ) => {
+    const updated = {
+      ...globalThreshold,
+      [field]: Math.max(1, value)
+    };
+
+    if (field === 'receivingMaxMinutes' && updated.delayedMaxMinutes <= updated.receivingMaxMinutes) {
+      updated.delayedMaxMinutes = updated.receivingMaxMinutes + 1;
+    }
+    if (field === 'delayedMaxMinutes' && updated.delayedMaxMinutes <= updated.receivingMaxMinutes) {
+      updated.receivingMaxMinutes = Math.max(1, updated.delayedMaxMinutes - 1);
+    }
+
+    setGlobalThreshold(updated);
+    try {
+      localStorage.setItem('ibhar_global_threshold', JSON.stringify(updated));
+      window.dispatchEvent(new Event('ibhar_thresholds_updated'));
+      setSavedNotice(`Updated system-wide default thresholds (Receiving ≤ ${updated.receivingMaxMinutes}m, Critical > ${updated.delayedMaxMinutes}m)`);
+      setTimeout(() => setSavedNotice(null), 3000);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleApplyGlobalPreset = (receiving: number, delayed: number, name: string) => {
+    const updated = {
+      receivingMaxMinutes: receiving,
+      delayedMaxMinutes: delayed
+    };
+    setGlobalThreshold(updated);
+    try {
+      localStorage.setItem('ibhar_global_threshold', JSON.stringify(updated));
+      window.dispatchEvent(new Event('ibhar_thresholds_updated'));
+      setSavedNotice(`Applied ${name} (Receiving ≤ ${receiving}m, Critical > ${delayed}m)`);
+      setTimeout(() => setSavedNotice(null), 3000);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleUpdateHospitalThreshold = (
     id: string,
     field: keyof HospitalThresholdConfig,
@@ -112,7 +154,8 @@ export const HospitalRefreshRatePage: React.FC = () => {
     setThresholdOverrides(nextOverrides);
     try {
       localStorage.setItem('ibhar_hospital_thresholds', JSON.stringify(nextOverrides));
-      setSavedNotice(`Updated thresholds for ${id}`);
+      window.dispatchEvent(new Event('ibhar_thresholds_updated'));
+      setSavedNotice(`Updated custom thresholds for ${id}`);
       setTimeout(() => setSavedNotice(null), 2500);
     } catch (e) {
       console.error(e);
@@ -125,6 +168,7 @@ export const HospitalRefreshRatePage: React.FC = () => {
     setThresholdOverrides(nextOverrides);
     try {
       localStorage.setItem('ibhar_hospital_thresholds', JSON.stringify(nextOverrides));
+      window.dispatchEvent(new Event('ibhar_thresholds_updated'));
       setSavedNotice(`Reset ${id} to system default`);
       setTimeout(() => setSavedNotice(null), 2500);
     } catch (e) {
@@ -138,6 +182,7 @@ export const HospitalRefreshRatePage: React.FC = () => {
     try {
       localStorage.removeItem('ibhar_hospital_thresholds');
       localStorage.removeItem('ibhar_global_threshold');
+      window.dispatchEvent(new Event('ibhar_thresholds_updated'));
       setSavedNotice('All thresholds reset to project defaults');
       setTimeout(() => setSavedNotice(null), 3000);
     } catch (e) {
@@ -160,7 +205,7 @@ export const HospitalRefreshRatePage: React.FC = () => {
             <Sliders className="w-6 h-6 text-blue-600 dark:text-blue-400" />
           </h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 font-sans mt-1">
-            Configure custom Healthy, Delayed, and Critical conditional thresholds for each institution
+            Configure dynamic overall default conditions (30m, 60m, 90m) or customize per-hospital rules
           </p>
         </div>
 
@@ -194,47 +239,153 @@ export const HospitalRefreshRatePage: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Default Pattern Reference Banner */}
-      <Card className="p-5 sm:p-6 border-2 border-blue-200 dark:border-blue-900/60 bg-gradient-to-br from-blue-50/70 via-white to-indigo-50/40 dark:from-blue-950/40 dark:via-slate-900 dark:to-indigo-950/20 shadow-sm">
-        <div className="flex items-start gap-3.5">
-          <div className="p-2.5 rounded-2xl bg-blue-100 dark:bg-blue-900/80 text-blue-700 dark:text-blue-300 mt-0.5">
-            <Info className="w-5 h-5" />
+      {/* Dynamic Global Default Threshold Controller */}
+      <Card className="p-5 sm:p-6 border-2 border-blue-300 dark:border-blue-800 bg-gradient-to-br from-blue-50/80 via-white to-indigo-50/50 dark:from-blue-950/50 dark:via-slate-900 dark:to-indigo-950/30 shadow-md space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-blue-100 dark:border-blue-900/60 pb-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-blue-600 text-white shadow-md shadow-blue-500/20">
+              <Sliders className="w-5 h-5 stroke-[2.5]" />
+            </div>
+            <div>
+              <h3 className="font-heading font-black text-base sm:text-lg text-slate-900 dark:text-white flex items-center gap-2">
+                Dynamic Overall Default Conditions
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-800">
+                  SYSTEM-WIDE
+                </span>
+              </h3>
+              <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">
+                Applies dynamically to all hospitals unless a unique custom rule is assigned below
+              </p>
+            </div>
           </div>
-          <div className="space-y-1 flex-1">
-            <h3 className="font-heading font-black text-base sm:text-lg text-slate-900 dark:text-white flex items-center gap-2">
-              Default System Pattern Active
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-800">
-                STANDARD CADENCE
-              </span>
-            </h3>
-            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 font-medium">
-              By default, all live hospital streams follow standard HL7 ingestion thresholds:
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2.5">
-              <div className="p-3 rounded-xl bg-white dark:bg-slate-800/90 border border-emerald-200 dark:border-emerald-800/50 flex items-center gap-2.5">
+
+          {/* Quick Preset Buttons */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-bold text-slate-500 mr-1">Presets:</span>
+            <button
+              onClick={() => handleApplyGlobalPreset(30, 60, 'Standard 30/60m')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer border ${
+                globalThreshold.receivingMaxMinutes === 30 && globalThreshold.delayedMaxMinutes === 60
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-blue-50 dark:hover:bg-slate-700'
+              }`}
+            >
+              30 / 60 Min
+            </button>
+            <button
+              onClick={() => handleApplyGlobalPreset(60, 90, 'Extended 60/90m')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer border ${
+                globalThreshold.receivingMaxMinutes === 60 && globalThreshold.delayedMaxMinutes === 90
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-blue-50 dark:hover:bg-slate-700'
+              }`}
+            >
+              60 / 90 Min
+            </button>
+            <button
+              onClick={() => handleApplyGlobalPreset(90, 120, 'Long 90/120m')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer border ${
+                globalThreshold.receivingMaxMinutes === 90 && globalThreshold.delayedMaxMinutes === 120
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-blue-50 dark:hover:bg-slate-700'
+              }`}
+            >
+              90 / 120 Min
+            </button>
+          </div>
+        </div>
+
+        {/* 3 Interactive Global Condition Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+          {/* 1. Receiving (Healthy) */}
+          <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-800/90 border-2 border-emerald-200 dark:border-emerald-800/60 shadow-sm flex flex-col justify-between gap-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse" />
-                <div>
-                  <p className="text-xs font-black text-emerald-700 dark:text-emerald-300 uppercase">Receiving (Healthy)</p>
-                  <p className="text-[11px] font-mono font-bold text-slate-500">Delay ≤ {globalThreshold.receivingMaxMinutes} min</p>
-                </div>
+                <span className="text-xs font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+                  Receiving Max
+                </span>
               </div>
+              <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md">
+                HEALTHY
+              </span>
+            </div>
 
-              <div className="p-3 rounded-xl bg-white dark:bg-slate-800/90 border border-amber-200 dark:border-amber-800/50 flex items-center gap-2.5">
-                <span className="w-3 h-3 rounded-full bg-amber-500" />
-                <div>
-                  <p className="text-xs font-black text-amber-700 dark:text-amber-300 uppercase">Delayed</p>
-                  <p className="text-[11px] font-mono font-bold text-slate-500">Delay {globalThreshold.receivingMaxMinutes + 1} – {globalThreshold.delayedMaxMinutes} min</p>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-white dark:bg-slate-800/90 border border-rose-200 dark:border-rose-800/50 flex items-center gap-2.5">
-                <span className="w-3 h-3 rounded-full bg-rose-500 animate-ping" />
-                <div>
-                  <p className="text-xs font-black text-rose-700 dark:text-rose-300 uppercase">Critical Alert</p>
-                  <p className="text-[11px] font-mono font-bold text-slate-500">Delay &gt; {globalThreshold.delayedMaxMinutes} min</p>
-                </div>
+            <div className="flex items-center justify-between gap-2 pt-1 border-t border-emerald-100 dark:border-emerald-900/40">
+              <span className="text-xs font-bold text-slate-600 dark:text-slate-400">Delay ≤</span>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={1}
+                  max={300}
+                  value={globalThreshold.receivingMaxMinutes}
+                  onChange={(e) => handleUpdateGlobalThreshold('receivingMaxMinutes', parseInt(e.target.value, 10) || 1)}
+                  className="w-20 p-1.5 text-center font-mono font-black text-sm rounded-xl bg-slate-50 dark:bg-slate-900 border-2 border-emerald-400 dark:border-emerald-600 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <span className="text-xs font-mono font-bold text-slate-500">mins</span>
               </div>
             </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+              Data arrives within expected cadence.
+            </p>
+          </div>
+
+          {/* 2. Delayed */}
+          <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-800/90 border-2 border-amber-200 dark:border-amber-800/60 shadow-sm flex flex-col justify-between gap-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-amber-500" />
+                <span className="text-xs font-black uppercase tracking-wider text-amber-700 dark:text-amber-300">
+                  Delayed Window
+                </span>
+              </div>
+              <span className="text-[10px] font-mono font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-md">
+                WARNING
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 pt-1 border-t border-amber-100 dark:border-amber-900/40">
+              <span className="text-xs font-bold text-slate-600 dark:text-slate-400">Range</span>
+              <div className="flex items-center gap-1 font-mono font-black text-sm text-amber-700 dark:text-amber-300 px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800">
+                <span>{globalThreshold.receivingMaxMinutes + 1}m – {globalThreshold.delayedMaxMinutes}m</span>
+              </div>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+              Transition window before critical escalation.
+            </p>
+          </div>
+
+          {/* 3. Critical Alert (Now Directly Editable) */}
+          <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-800/90 border-2 border-rose-200 dark:border-rose-800/60 shadow-sm flex flex-col justify-between gap-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-rose-500 animate-ping" />
+                <span className="text-xs font-black uppercase tracking-wider text-rose-700 dark:text-rose-300">
+                  Critical Alert
+                </span>
+              </div>
+              <span className="text-[10px] font-mono font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 px-2 py-0.5 rounded-md">
+                ACTION REQ
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 pt-1 border-t border-rose-100 dark:border-rose-900/40">
+              <span className="text-xs font-bold text-slate-600 dark:text-slate-400">Delay &gt;</span>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={globalThreshold.receivingMaxMinutes + 1}
+                  max={1440}
+                  value={globalThreshold.delayedMaxMinutes}
+                  onChange={(e) => handleUpdateGlobalThreshold('delayedMaxMinutes', parseInt(e.target.value, 10) || (globalThreshold.receivingMaxMinutes + 1))}
+                  className="w-20 p-1.5 text-center font-mono font-black text-sm rounded-xl bg-slate-50 dark:bg-slate-900 border-2 border-rose-400 dark:border-rose-600 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500"
+                />
+                <span className="text-xs font-mono font-bold text-slate-500">mins</span>
+              </div>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+              Delays exceeding this time trigger Critical status.
+            </p>
           </div>
         </div>
       </Card>

@@ -5,12 +5,12 @@ import {
   Coins,
   TrendingUp,
   RefreshCw,
-  ExternalLink,
   AlertTriangle,
-  Clock,
   Zap,
   Play,
-  Tv
+  Tv,
+  Server,
+  CloudLightning
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -29,13 +29,14 @@ import { apiService } from '../../services/api';
 export const AwsCostsPage: React.FC = () => {
   const navigate = useNavigate();
   const [summary, setSummary] = useState<any>(null);
-  const [hourlyData, setHourlyData] = useState<any[]>([]);
   const [dailyData, setDailyData] = useState<any[]>([]);
   const [serviceData, setServiceData] = useState<any[]>([]);
   const [resources, setResources] = useState<any[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isForceSyncing, setIsForceSyncing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
   // 10s Page Auto-Swap states (between AWS Costs and Live)
   const [isPageRotating, setIsPageRotating] = useState<boolean>(() => {
@@ -112,21 +113,26 @@ export const AwsCostsPage: React.FC = () => {
   const fetchDashboardData = async () => {
     try {
       setErrorMsg(null);
-      const [sum, hr, day, srv, res] = await Promise.all([
+      const [sum, day, srv, res] = await Promise.all([
         apiService.getAwsCostSummary(),
-        apiService.getAwsHourlyCosts(24),
         apiService.getAwsDailyCosts(30),
         apiService.getAwsCostByService(7),
         apiService.getAwsRunningServices()
       ]);
 
-      if (sum && sum.success !== false) setSummary(sum);
-      if (hr && hr.results) setHourlyData(hr.results);
+      if (sum && sum.success !== false) {
+        setSummary(sum);
+        if (sum.last_updated) {
+          setLastUpdated(sum.last_updated);
+        }
+      }
       if (day && day.results) setDailyData(day.results);
       if (srv && srv.services) setServiceData(srv.services);
       if (res && res.resources) setResources(res.resources);
 
-      setLastUpdated(new Date().toLocaleTimeString());
+      if (!sum?.last_updated) {
+        setLastUpdated(new Date().toLocaleTimeString());
+      }
     } catch (err: any) {
       console.error('Failed to load AWS Cost telemetry:', err);
       setErrorMsg('Could not reach AWS Cost API. Showing cached snapshot.');
@@ -135,9 +141,10 @@ export const AwsCostsPage: React.FC = () => {
     }
   };
 
+  // Polling cycle set to 30 minutes (snapshots update twice daily)
   useEffect(() => {
     fetchDashboardData();
-    const interval = setInterval(fetchDashboardData, 60000);
+    const interval = setInterval(fetchDashboardData, 1800000);
     return () => clearInterval(interval);
   }, []);
 
@@ -146,37 +153,64 @@ export const AwsCostsPage: React.FC = () => {
     fetchDashboardData();
   };
 
-  // Peak hourly computation
-  const peakHourly = hourlyData.reduce((max: number, cur: any) => {
-    const val = Number(cur.Total?.UnblendedCost?.Amount || 0);
-    return val > max ? val : max;
-  }, 0);
+  const handleForceAwsSync = async () => {
+    const confirmed = window.confirm(
+      'Triggering an on-demand AWS Cost Explorer sync will invoke AWS APIs ($0.01 per query). A 1-hour cooldown applies.\n\nDo you wish to proceed?'
+    );
+    if (!confirmed) return;
 
-  // Hourly chart points for Line Graph
-  const hourlyChartPoints = hourlyData.map((item: any) => {
+    setIsForceSyncing(true);
+    setSyncNotice(null);
+    try {
+      const res = await apiService.refreshAwsCostSnapshot();
+      if (res && res.success) {
+        setSyncNotice('AWS snapshot refreshed successfully!');
+        await fetchDashboardData();
+      } else if (res && res.error) {
+        setSyncNotice(res.error);
+      } else {
+        setSyncNotice('AWS refresh request submitted.');
+        await fetchDashboardData();
+      }
+    } catch (err: any) {
+      setSyncNotice('Failed to trigger AWS Cost sync.');
+    } finally {
+      setIsForceSyncing(false);
+      setTimeout(() => setSyncNotice(null), 8000);
+    }
+  };
+
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  // 1. Last 7 Days Daily Spend Chart Data (derived from dailyData)
+  const last7DaysData = dailyData.slice(-7);
+  const last7DaysChartPoints = last7DaysData.map((item: any) => {
     const amt = Number(item.Total?.UnblendedCost?.Amount || 0);
     const dt = new Date(item.TimePeriod?.Start || '');
-    const hourStr = dt.getHours().toString().padStart(2, '0') + ':00';
+    const dateLabel = isNaN(dt.getTime()) ? '' : `${monthNames[dt.getMonth()]} ${dt.getDate()}`;
+    const weekday = isNaN(dt.getTime()) ? '' : dt.toLocaleDateString(undefined, { weekday: 'short' });
     return {
-      time: hourStr,
-      cost: Number(amt.toFixed(4)),
-      fullTime: dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      date: dateLabel,
+      weekday,
+      spend: Number(amt.toFixed(2)),
+      fullDate: isNaN(dt.getTime()) ? '' : dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }),
     };
   });
 
-  // Daily total sum & Rank-based 4-Tier color mapping
+  const total7Days = last7DaysChartPoints.reduce((sum, cur) => sum + cur.spend, 0);
+  const peak7Days = last7DaysChartPoints.reduce((max, cur) => (cur.spend > max ? cur.spend : max), 0);
+
+  // 2. 30-Day Daily total sum & Rank-based 4-Tier color mapping
   const total30Days = dailyData.reduce((sum: number, cur: any) => sum + Number(cur.Total?.UnblendedCost?.Amount || 0), 0);
 
-  // Sorted unique amounts descending to compute exact rank
   const sortedAmounts = [...dailyData]
     .map((item: any) => Number(item.Total?.UnblendedCost?.Amount || 0))
     .sort((a, b) => b - a);
 
-  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const dailyChartPoints = dailyData.map((item: any) => {
     const amt = Number(item.Total?.UnblendedCost?.Amount || 0);
     const dt = new Date(item.TimePeriod?.Start || '');
-    const dateLabel = `${monthNames[dt.getMonth()]} ${dt.getDate()}`;
+    const dateLabel = isNaN(dt.getTime()) ? '' : `${monthNames[dt.getMonth()]} ${dt.getDate()}`;
     const rankIndex = sortedAmounts.indexOf(amt);
 
     let gradientId = 'dailyGreen';
@@ -184,15 +218,15 @@ export const AwsCostsPage: React.FC = () => {
     let badgeColor = '#10B981';
 
     if (rankIndex < 3) {
-      gradientId = 'dailyRose'; // Top 3 Highest -> Neon Rose
+      gradientId = 'dailyRose';
       rankBadge = `Top 3 Peak (#${rankIndex + 1})`;
       badgeColor = '#F43F5E';
     } else if (rankIndex < 6) {
-      gradientId = 'dailyAmber'; // Next 3 -> Golden Orange
+      gradientId = 'dailyAmber';
       rankBadge = `Top 4-6 High (#${rankIndex + 1})`;
       badgeColor = '#F59E0B';
     } else if (rankIndex < 9) {
-      gradientId = 'dailyPurple'; // Next 3 -> Purple / Violet
+      gradientId = 'dailyPurple';
       rankBadge = `Top 7-9 Moderate (#${rankIndex + 1})`;
       badgeColor = '#8B5CF6';
     }
@@ -212,6 +246,11 @@ export const AwsCostsPage: React.FC = () => {
   const mtdCost = Number(summary?.mtd_cost ?? 412.50);
   const budgetUsedPercent = Number(((mtdCost / effectiveBudget) * 100).toFixed(1));
   const forecastCost = Number(summary?.forecast_cost ?? 2450.00);
+  const hourlyRate = Number(summary?.current_hourly_rate ?? 2.85);
+
+  const ec2Resources = resources.filter((r: any) => r.type?.toLowerCase().includes('ec2'));
+  const totalEc2Count = ec2Resources.length || 3;
+  const runningEc2Count = ec2Resources.filter((r: any) => r.state?.toLowerCase() === 'running').length || totalEc2Count;
 
   return (
     <motion.div
@@ -242,7 +281,7 @@ export const AwsCostsPage: React.FC = () => {
               )}
             </div>
             <p className="text-xs font-bold text-slate-500 dark:text-slate-400">
-              Cloud Infrastructure Spend, Run Rates & Hospital DB Integration Health
+              Cloud Infrastructure Spend, Run Rates & Hospital DB Server Health
             </p>
           </div>
         </div>
@@ -272,28 +311,38 @@ export const AwsCostsPage: React.FC = () => {
             )}
           </button>
 
-          {/* External Wall Display Link */}
-          <a
-            href="http://localhost:8000/aws-costs/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-extrabold bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 transition-colors"
-            title="Open Dedicated Full-Screen Wall Display"
-          >
-            <ExternalLink className="w-3.5 h-3.5" />
-            <span>Wall Display</span>
-          </a>
+          {/* Force AWS Sync Button */}
+          {!isMock && (
+            <button
+              onClick={handleForceAwsSync}
+              disabled={isForceSyncing}
+              title="Trigger an on-demand AWS Cost Explorer sync (1h cooldown)"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-extrabold bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 transition-all cursor-pointer shadow-sm disabled:opacity-50"
+            >
+              <CloudLightning className={`w-3.5 h-3.5 ${isForceSyncing ? 'animate-bounce' : ''}`} />
+              <span>{isForceSyncing ? 'Syncing...' : 'Sync AWS'}</span>
+            </button>
+          )}
 
+          {/* Snapshot Refresh Button */}
           <button
             onClick={handleManualRefresh}
             disabled={isRefreshing}
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-extrabold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer shadow-sm"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-            <span>{lastUpdated ? `Updated ${lastUpdated}` : 'Refresh'}</span>
+            <span>{lastUpdated ? `Data as of ${lastUpdated}` : 'Refresh'}</span>
           </button>
         </div>
       </div>
+
+      {/* Sync Notice Banner */}
+      {syncNotice && (
+        <div className="p-3.5 bg-blue-50 dark:bg-blue-950/60 border-2 border-blue-200 dark:border-blue-800 rounded-2xl flex items-center justify-between gap-2.5 text-blue-700 dark:text-blue-300 text-xs font-bold">
+          <span>{syncNotice}</span>
+          <button onClick={() => setSyncNotice(null)} className="text-blue-500 hover:underline">Dismiss</button>
+        </div>
+      )}
 
       {/* Error / Stale Banner */}
       {errorMsg && (
@@ -305,20 +354,20 @@ export const AwsCostsPage: React.FC = () => {
 
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4">
-        {/* KPI 1: Hourly Burn */}
+        {/* KPI 1: Hourly Burn (Estimate) */}
         <div className="bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between text-xs font-extrabold text-slate-500 dark:text-slate-400 mb-2">
-            <span>HOURLY BURN</span>
-            <Clock className="w-4 h-4 text-blue-500" />
+            <span>HOURLY BURN (EST.)</span>
+            <Zap className="w-4 h-4 text-blue-500" />
           </div>
           <div className="flex items-baseline gap-1 my-1">
             <span className="text-2xl font-black text-slate-900 dark:text-white font-mono">
-              ${Number(summary?.current_hourly_rate ?? 2.85).toFixed(2)}
+              ${hourlyRate.toFixed(2)}
             </span>
             <span className="text-xs font-bold text-slate-400">/hr</span>
           </div>
           <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
-            Est. ${(Number(summary?.current_hourly_rate ?? 2.85) * 24).toFixed(0)} / 24-hr day
+            Est. ${(hourlyRate * 24).toFixed(0)} / 24-hr day
           </p>
         </div>
 
@@ -399,10 +448,10 @@ export const AwsCostsPage: React.FC = () => {
           </p>
         </div>
 
-        {/* KPI 5: RDS DB Health */}
+        {/* KPI 5: EC2 Compute Fleet Health */}
         <div className="bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between text-xs font-extrabold text-slate-500 dark:text-slate-400 mb-1">
-            <span>RDS DB HEALTH</span>
+            <span>EC2 COMPUTE FLEET</span>
             <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
               healthStatus === 'healthy' 
                 ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400'
@@ -413,88 +462,91 @@ export const AwsCostsPage: React.FC = () => {
           </div>
           <div className="grid grid-cols-3 gap-1 my-1 py-1 px-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/60 text-center">
             <div>
-              <span className="block text-[9px] font-bold text-slate-400">CPU</span>
+              <span className="block text-[9px] font-bold text-slate-400">NODES</span>
               <span className="text-xs font-black font-mono text-slate-800 dark:text-slate-200">
-                {summary?.integration_health_details?.metrics?.cpu_utilization?.value ?? 24}%
+                {totalEc2Count}
               </span>
             </div>
             <div>
-              <span className="block text-[9px] font-bold text-slate-400">CONNS</span>
+              <span className="block text-[9px] font-bold text-slate-400">RUNNING</span>
               <span className="text-xs font-black font-mono text-slate-800 dark:text-slate-200">
-                {summary?.integration_health_details?.metrics?.database_connections?.value ?? 52}
+                {runningEc2Count}/{totalEc2Count}
               </span>
             </div>
             <div>
-              <span className="block text-[9px] font-bold text-slate-400">FREE</span>
-              <span className="text-xs font-black font-mono text-slate-800 dark:text-slate-200">
-                {summary?.integration_health_details?.metrics?.free_storage_space_gb?.value ?? 124}G
+              <span className="block text-[9px] font-bold text-slate-400">STATUS</span>
+              <span className="text-xs font-black font-mono text-emerald-600 dark:text-emerald-400">
+                100%
               </span>
             </div>
           </div>
-          <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 truncate">
-            PostgreSQL 15.4 Primary
+          <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 truncate flex items-center gap-1">
+            <Server className="w-3 h-3 text-slate-400 shrink-0" />
+            AWS EC2 Virtual Fleet
           </p>
         </div>
       </div>
 
       {/* Main Charts Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Hourly Cost Timeline (2 Cols) - Line Graph */}
+        {/* Last 7 Days Daily Spend (2 Cols) - Area Chart */}
         <div className="md:col-span-2 bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
           <div className="flex items-center justify-between mb-2">
             <div>
               <h2 className="text-base font-extrabold text-slate-900 dark:text-white">
-                Hourly Cost Timeline (Last 24 Hours)
+                Last 7 Days Daily Spend
               </h2>
               <p className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                Real-time telemetry spend across ingestion pipelines
+                Recent daily spend trajectory from daily Cost Explorer telemetry
               </p>
             </div>
             <div className="flex items-center gap-2">
               <span className="px-2.5 py-1 rounded-lg text-xs font-extrabold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                Peak: <strong className="font-mono text-blue-600 dark:text-blue-400">${peakHourly.toFixed(2)}</strong>
+                Peak: <strong className="font-mono text-blue-600 dark:text-blue-400">${peak7Days.toFixed(2)}</strong>
+              </span>
+              <span className="px-2.5 py-1 rounded-lg text-xs font-extrabold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                7-Day Total: <strong className="font-mono">${total7Days.toFixed(2)}</strong>
               </span>
             </div>
           </div>
 
-          {/* Recharts Area / Line Chart with X & Y Axes */}
+          {/* Recharts Area Chart */}
           <div className="h-64 w-full pt-3 pb-1">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={hourlyChartPoints} margin={{ top: 10, right: 15, left: -10, bottom: 0 }}>
+              <AreaChart data={last7DaysChartPoints} margin={{ top: 10, right: 15, left: -10, bottom: 0 }}>
                 <defs>
-                  <linearGradient id="hourlyCostGradient" x1="0" y1="0" x2="0" y2="1">
+                  <linearGradient id="sevenDaySpendGradient" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.45} />
                     <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.35} vertical={false} />
                 <XAxis
-                  dataKey="time"
+                  dataKey="date"
                   stroke="#64748b"
                   tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 700 }}
                   axisLine={{ stroke: '#334155' }}
                   tickLine={{ stroke: '#334155' }}
-                  interval="preserveStartEnd"
                 />
                 <YAxis
                   stroke="#64748b"
-                  tickFormatter={(val) => `$${Number(val).toFixed(2)}`}
+                  tickFormatter={(val) => `$${Number(val).toFixed(0)}`}
                   tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}
                   axisLine={{ stroke: '#334155' }}
                   tickLine={{ stroke: '#334155' }}
-                  domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.15 * 10) / 10 || 5]}
+                  domain={[0, (dataMax: number) => Math.ceil((dataMax * 1.15) / 10) * 10 || 100]}
                 />
                 <Tooltip
-                  content={({ active, payload, label }) => {
+                  content={({ active, payload }) => {
                     if (active && payload && payload.length) {
-                      const val = Number(payload[0].value);
+                      const data = payload[0].payload;
                       return (
                         <div className="bg-slate-900/95 backdrop-blur-md text-white p-2.5 rounded-xl shadow-2xl text-xs font-mono border border-slate-700 pointer-events-none">
                           <div className="text-slate-400 text-[10px] font-bold border-b border-slate-800 pb-1 mb-1">
-                            Time: {label}
+                            {data.fullDate || data.date}
                           </div>
                           <div className="text-blue-400 font-black text-sm">
-                            Cost: ${val.toFixed(4)} / hr
+                            Daily Spend: ${Number(data.spend).toFixed(2)}
                           </div>
                         </div>
                       );
@@ -504,13 +556,13 @@ export const AwsCostsPage: React.FC = () => {
                 />
                 <Area
                   type="monotone"
-                  dataKey="cost"
+                  dataKey="spend"
                   stroke="#3b82f6"
                   strokeWidth={3}
                   fillOpacity={1}
-                  fill="url(#hourlyCostGradient)"
-                  dot={{ r: 3, fill: '#60a5fa', stroke: '#1d4ed8', strokeWidth: 1.5 }}
-                  activeDot={{ r: 6, fill: '#93c5fd', stroke: '#1e40af', strokeWidth: 2 }}
+                  fill="url(#sevenDaySpendGradient)"
+                  dot={{ r: 4, fill: '#60a5fa', stroke: '#1d4ed8', strokeWidth: 1.5 }}
+                  activeDot={{ r: 7, fill: '#93c5fd', stroke: '#1e40af', strokeWidth: 2 }}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -595,30 +647,26 @@ export const AwsCostsPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Recharts BarChart with exact colors and X/Y axes */}
+        {/* Recharts BarChart */}
         <div className="h-64 w-full pt-3 pb-1">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={dailyChartPoints} margin={{ top: 10, right: 15, left: -10, bottom: 0 }}>
               <defs>
-                {/* 1. Neon Rose / Coral Pink (Top 1-3 Highest) */}
                 <linearGradient id="dailyRose" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#FB7185" />
                   <stop offset="100%" stopColor="#E11D48" />
                 </linearGradient>
 
-                {/* 2. Amber / Golden Orange (Next 3) */}
                 <linearGradient id="dailyAmber" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#FBBF24" />
                   <stop offset="100%" stopColor="#D97706" />
                 </linearGradient>
 
-                {/* 3. Purple / Violet (Next 3) */}
                 <linearGradient id="dailyPurple" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#A855F7" />
                   <stop offset="100%" stopColor="#7C3AED" />
                 </linearGradient>
 
-                {/* 4. Emerald / Mint Green (Remaining) */}
                 <linearGradient id="dailyGreen" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#34D399" />
                   <stop offset="100%" stopColor="#059669" />

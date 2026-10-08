@@ -19,7 +19,8 @@ export const DashboardPage: React.FC = () => {
     isBackendConnected,
     apiError,
     manualRefresh,
-    isLoading
+    isLoading,
+    thresholdVersion
   } = useMonitoring();
   const navigate = useNavigate();
 
@@ -78,7 +79,7 @@ export const DashboardPage: React.FC = () => {
       criticalCount: critical,
       totalIngestedRows: totalRows,
     };
-  }, [logs, liveDashboard, integrationHealthData, dashboardMetrics, hospitals]);
+  }, [logs, liveDashboard, integrationHealthData, dashboardMetrics, hospitals, thresholdVersion]);
 
   const avgResponseTime = integrationHealthData?.summary?.average_response_time_ms ?? 75;
   const avgDurationSeconds = integrationHealthData?.summary?.average_duration_seconds ?? 0.08;

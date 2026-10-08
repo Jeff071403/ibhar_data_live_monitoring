@@ -12,16 +12,17 @@ class CostProvider(ABC):
     @abstractmethod
     def get_hourly_cost(self, start: Optional[datetime] = None, end: Optional[datetime] = None) -> Dict[str, Any]:
         """
-        Retrieves hourly cost data across recent hours.
-        Matches AWS Cost Explorer GetCostAndUsage response format with Granularity='HOURLY'.
+        DEPRECATED: Hourly Cost Explorer API is no longer actively polled by the dashboard
+        to eliminate CE invocation costs ($0.01/call).
+        Retained for backwards compatibility with legacy callers.
         """
         pass
 
     @abstractmethod
     def get_daily_cost(self, start: Optional[datetime] = None, end: Optional[datetime] = None) -> Dict[str, Any]:
         """
-        Retrieves daily cost trend.
-        Matches AWS Cost Explorer GetCostAndUsage response format with Granularity='DAILY'.
+        Retrieves daily cost trend (canonical 30-day window, DAILY granularity, grouped by SERVICE).
+        This single Cost Explorer query serves as the source of truth for daily spend, MTD, and service breakdown.
         """
         pass
 
@@ -29,7 +30,7 @@ class CostProvider(ABC):
     def get_cost_by_service(self, start: Optional[datetime] = None, end: Optional[datetime] = None) -> Dict[str, Any]:
         """
         Retrieves cost grouped by AWS Service (EC2, RDS, S3, Lambda, CloudWatch, Data Transfer, etc.).
-        Matches AWS Cost Explorer GetCostAndUsage response with GroupBy=[{'Type': 'DIMENSION', 'Key': 'SERVICE'}].
+        Derived by aggregating sliced entries from get_daily_cost to prevent redundant CE API calls.
         """
         pass
 
@@ -44,21 +45,21 @@ class CostProvider(ABC):
     @abstractmethod
     def get_running_resources(self) -> List[Dict[str, Any]]:
         """
-        Lists currently running AWS resources across EC2, RDS, and Lambda.
+        Lists currently running AWS resources across EC2 instances and Lambda functions.
         """
         pass
 
     @abstractmethod
     def get_integration_health(self) -> Dict[str, Any]:
         """
-        Derives hospital database integration health based on RDS CloudWatch telemetry
-        (CPUUtilization, DatabaseConnections, FreeStorageSpace, IOPS/Latency).
+        Derives compute infrastructure health based on EC2 fleet status.
         """
         pass
 
     @abstractmethod
     def get_summary(self) -> Dict[str, Any]:
         """
-        Returns high-level summary KPIs (Today's cost, MTD cost, Forecast, Budget %, Top services, RDS health status).
+        Returns high-level summary KPIs (Today's cost, MTD cost, Forecast, Estimated hourly run-rate,
+        Budget %, Top services, EC2 compute fleet status).
         """
         pass

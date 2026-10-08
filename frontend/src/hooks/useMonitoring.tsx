@@ -47,6 +47,7 @@ interface MonitoringContextType {
   getHospitalById: (id: string) => Hospital | undefined;
   unreadAlertsCount: number;
   isSimulatingUpdate: boolean;
+  thresholdVersion: number;
   refreshIntervalMinutes: number;
   setRefreshIntervalMinutes: (mins: number) => void;
   importHospitals: (newHospitals: Hospital[]) => void;
@@ -58,9 +59,11 @@ const MonitoringContext = createContext<MonitoringContextType | undefined>(undef
  * Helper to map LiveHospital telemetry from the external REST API to the UI's Hospital model
  */
 function mapLiveHospitalToUiHospital(live: LiveHospital): Hospital {
+  const { customThresholds, globalThresh } = getStoredThresholds();
+  const threshold = customThresholds[live.hospital_code || ''] || globalThresh;
   const isCritical = live.status === 'error' || (live.error_count !== undefined && live.error_count > 0);
-  const delayMinutes = live.last_synced_at ? computeDelayMinutes(live.last_synced_at) : (live.status === 'delayed' ? 35 : 0);
-  const statusInfo = getHospitalLiveStatus(delayMinutes);
+  const delayMinutes = live.last_synced_at ? computeDelayMinutes(live.last_synced_at) : (live.status === 'delayed' ? (threshold.receivingMaxMinutes + 5) : 0);
+  const statusInfo = getHospitalLiveStatus(delayMinutes, threshold);
   
   let mappedStatus: Hospital['status'] = 'healthy';
   if (isCritical || statusInfo.label === 'CRITICAL') {
@@ -102,6 +105,67 @@ function mapLiveHospitalToUiHospital(live: LiveHospital): Hospital {
   };
 }
 
+
+/**
+ * Helper to retrieve and persist last known non-zero data ingestion per hospital in browser memory (Zero DB overhead)
+ */
+export function getPersistedNonZeroMap(): Record<string, { received_at: string; record_count: number; records_processed: number }> {
+  try {
+    const saved = localStorage.getItem('ibhar_last_non_zero_sync');
+    return saved ? JSON.parse(saved) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function savePersistedNonZeroMap(map: Record<string, { received_at: string; record_count: number; records_processed: number }>): void {
+  try {
+    localStorage.setItem('ibhar_last_non_zero_sync', JSON.stringify(map));
+  } catch {}
+}
+
+export function mergeWithPersistedNonZeroRecords(records: IntegrationHealthLog[]): IntegrationHealthLog[] {
+  const nonZeroMap = getPersistedNonZeroMap();
+  let mapUpdated = false;
+
+  const merged = records.map((h: IntegrationHealthLog) => {
+    const hId = (h.hospital_id || h.hospital_code || '').trim();
+    if (!hId) return h;
+
+    const proc = h.record_count ?? h.records_processed ?? 0;
+    const rawTs = h.received_at || h.start_time;
+
+    if (proc > 0 && rawTs) {
+      // New incoming data with rows > 0: update persisted state
+      nonZeroMap[hId] = {
+        received_at: rawTs,
+        record_count: proc,
+        records_processed: proc
+      };
+      mapUpdated = true;
+      return h;
+    }
+
+    // If 0 rows in this cycle, check if we have a preserved non-zero record in UI memory
+    if (nonZeroMap[hId]) {
+      return {
+        ...h,
+        received_at: nonZeroMap[hId].received_at,
+        start_time: nonZeroMap[hId].received_at,
+        record_count: nonZeroMap[hId].record_count,
+        records_processed: nonZeroMap[hId].records_processed,
+      };
+    }
+
+    return h;
+  });
+
+  if (mapUpdated) {
+    savePersistedNonZeroMap(nonZeroMap);
+  }
+
+  return merged;
+}
 
 function getDateRangeForTimeRange(range: TimeRange): { start_date?: string; end_date?: string } {
   const now = new Date();
@@ -164,6 +228,22 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   };
 
+  const [thresholdVersion, setThresholdVersion] = useState<number>(0);
+
+  useEffect(() => {
+    const handleThresholdChange = () => {
+      setThresholdVersion(prev => prev + 1);
+    };
+
+    window.addEventListener('ibhar_thresholds_updated', handleThresholdChange);
+    window.addEventListener('storage', handleThresholdChange);
+
+    return () => {
+      window.removeEventListener('ibhar_thresholds_updated', handleThresholdChange);
+      window.removeEventListener('storage', handleThresholdChange);
+    };
+  }, []);
+
   const [timeRange, setTimeRange] = useState<TimeRange>('today');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isBackendConnected, setIsBackendConnected] = useState<boolean>(true);
@@ -217,14 +297,23 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setLiveError(null);
       }
 
+      let processedHealthRes = healthRes;
+      if (healthRes && healthRes.data && healthRes.data.length > 0) {
+        const mergedData = mergeWithPersistedNonZeroRecords(healthRes.data);
+        processedHealthRes = {
+          ...healthRes,
+          data: mergedData,
+        };
+      }
+
       /* 
        * DATA SOURCE SELECTION:
-       * Primary Source of Truth: Live REST API (liveRes / healthRes)
+       * Primary Source of Truth: Live REST API (liveRes / processedHealthRes)
        * Fallback: Local Database (hospitalsRes)
        */
-      if (healthRes && healthRes.data && healthRes.data.length > 0) {
+      if (processedHealthRes && processedHealthRes.data && processedHealthRes.data.length > 0) {
         const { customThresholds, globalThresh } = getStoredThresholds();
-        const mappedLiveHospitals: Hospital[] = healthRes.data.map((h: IntegrationHealthLog) => {
+        const mappedLiveHospitals: Hospital[] = processedHealthRes.data.map((h: IntegrationHealthLog) => {
           const delay = computeDelayMinutes(h.received_at || h.start_time, h.delay_minutes);
           const threshold = customThresholds[h.hospital_id || h.hospital_code || ''] || globalThresh;
           const statusInfo = getHospitalLiveStatus(delay, threshold);
@@ -401,8 +490,8 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setEncounters(encountersRes || []);
       setDischarges(dischargesRes || []);
       setIngestionLogs(ingestionRes || []);
-      if (healthRes) {
-        setIntegrationHealthData(healthRes);
+      if (processedHealthRes) {
+        setIntegrationHealthData(processedHealthRes);
       }
       setLastUpdated(timeStr);
 
@@ -416,7 +505,7 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       isFetchingRef.current = false;
     }
 
-  }, [timeRange]);
+  }, [timeRange, thresholdVersion]);
 
   useEffect(() => {
     loadDataFromApi();
@@ -475,6 +564,7 @@ export const MonitoringProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         liveError,
         lastUpdated,
         autoRefresh,
+        thresholdVersion,
         refreshIntervalMinutes,
         setRefreshIntervalMinutes,
         timeRange,

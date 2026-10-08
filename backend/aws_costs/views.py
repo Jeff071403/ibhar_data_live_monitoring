@@ -5,12 +5,19 @@ from django.shortcuts import render
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
+from .models import AwsCostSnapshot
 from .services.factory import get_provider
+from .services.snapshot import get_or_create_latest_snapshot, refresh_aws_cost_snapshot
 
 logger = logging.getLogger(__name__)
+
+
+def is_real_mode() -> bool:
+    mode = getattr(settings, "AWS_COST_MODE", "mock").strip().lower()
+    return mode in ("real", "aws", "production")
 
 
 def dashboard_page_view(request):
@@ -18,7 +25,7 @@ def dashboard_page_view(request):
     Renders the AWS Cost & Telemetry Dashboard HTML page.
     """
     mode = getattr(settings, "AWS_COST_MODE", "mock").lower()
-    is_mock = mode != "real"
+    is_mock = not is_real_mode()
     context = {
         "is_mock": is_mock,
         "mode": mode,
@@ -32,22 +39,23 @@ def dashboard_page_view(request):
 @permission_classes([AllowAny])
 def hourly_cost_view(request):
     """
-    GET /aws-costs/api/hourly/?hours=24
+    DEPRECATED: GET /aws-costs/api/hourly/?hours=24
+    Hourly Cost Explorer querying is deprecated to reduce CE fees.
     """
     try:
         hours = int(request.query_params.get("hours", 24))
-        hours = max(1, min(hours, 336))  # Clamp between 1 hour and 14 days (CE hourly max limit)
-        now = timezone.now().replace(minute=0, second=0, microsecond=0)
-        start = now - timedelta(hours=hours)
-
+        hours = max(1, min(hours, 336))
+        
         provider = get_provider()
-        data = provider.get_hourly_cost(start=start, end=now)
+        data = provider.get_hourly_cost()
         
         return Response({
             "success": True,
             "hours": hours,
             "data": data,
-            "results": data.get("ResultsByTime", [])
+            "results": data.get("ResultsByTime", []),
+            "deprecated": True,
+            "note": "Hourly polling is deprecated to eliminate AWS Cost Explorer fees. Use /api/daily/."
         }, status=status.HTTP_200_OK)
     except Exception as e:
         logger.error(f"Error in hourly_cost_view: {e}", exc_info=True)
@@ -63,13 +71,30 @@ def hourly_cost_view(request):
 def daily_cost_view(request):
     """
     GET /aws-costs/api/daily/?days=30
+    In real mode, returns the daily trend from the latest DB snapshot (zero CE API fees).
     """
     try:
         days = int(request.query_params.get("days", 30))
         days = max(1, min(days, 365))
+
+        if is_real_mode():
+            snapshot = get_or_create_latest_snapshot()
+            daily_data = snapshot.payload.get("daily", {}) if snapshot else {}
+            all_results = daily_data.get("ResultsByTime", [])
+            sliced_results = all_results[-days:] if len(all_results) > days else all_results
+
+            return Response({
+                "success": True,
+                "days": days,
+                "data": daily_data,
+                "results": sliced_results,
+                "fetched_at": snapshot.fetched_at.isoformat() if snapshot else None,
+                "last_updated": snapshot.payload.get("last_updated") if snapshot else None,
+            }, status=status.HTTP_200_OK)
+
+        # Mock mode
         now = timezone.now().date()
         start = now - timedelta(days=days)
-
         provider = get_provider()
         data = provider.get_daily_cost(start=start, end=now)
 
@@ -93,13 +118,27 @@ def daily_cost_view(request):
 def cost_by_service_view(request):
     """
     GET /aws-costs/api/by-service/?days=7
+    In real mode, returns by-service aggregation from the latest DB snapshot.
     """
     try:
         days = int(request.query_params.get("days", 7))
         days = max(1, min(days, 90))
+
+        if is_real_mode():
+            snapshot = get_or_create_latest_snapshot()
+            srv_data = snapshot.payload.get("by_service_7d", {}) if snapshot else {}
+
+            return Response({
+                "success": True,
+                "days": days,
+                **srv_data,
+                "fetched_at": snapshot.fetched_at.isoformat() if snapshot else None,
+                "last_updated": snapshot.payload.get("last_updated") if snapshot else None,
+            }, status=status.HTTP_200_OK)
+
+        # Mock mode
         now = timezone.now().date()
         start = now - timedelta(days=days)
-
         provider = get_provider()
         data = provider.get_cost_by_service(start=start, end=now)
 
@@ -122,8 +161,21 @@ def cost_by_service_view(request):
 def forecast_view(request):
     """
     GET /aws-costs/api/forecast/
+    In real mode, reads forecast & budgets from the latest DB snapshot.
     """
     try:
+        if is_real_mode():
+            snapshot = get_or_create_latest_snapshot()
+            fc_data = snapshot.payload.get("forecast", {}) if snapshot else {}
+
+            return Response({
+                "success": True,
+                **fc_data,
+                "fetched_at": snapshot.fetched_at.isoformat() if snapshot else None,
+                "last_updated": snapshot.payload.get("last_updated") if snapshot else None,
+            }, status=status.HTTP_200_OK)
+
+        # Mock mode
         provider = get_provider()
         data = provider.get_forecast()
 
@@ -145,8 +197,22 @@ def forecast_view(request):
 def running_services_view(request):
     """
     GET /aws-costs/api/running-services/
+    In real mode, reads active EC2/Lambda inventory from snapshot.
     """
     try:
+        if is_real_mode():
+            snapshot = get_or_create_latest_snapshot()
+            resources = snapshot.payload.get("resources", []) if snapshot else []
+
+            return Response({
+                "success": True,
+                "count": len(resources),
+                "resources": resources,
+                "fetched_at": snapshot.fetched_at.isoformat() if snapshot else None,
+                "last_updated": snapshot.payload.get("last_updated") if snapshot else None,
+            }, status=status.HTTP_200_OK)
+
+        # Mock mode
         provider = get_provider()
         resources = provider.get_running_resources()
 
@@ -169,8 +235,21 @@ def running_services_view(request):
 def integration_health_view(request):
     """
     GET /aws-costs/api/integration-health/
+    In real mode, reads EC2 compute health from snapshot.
     """
     try:
+        if is_real_mode():
+            snapshot = get_or_create_latest_snapshot()
+            health = snapshot.payload.get("health", {}) if snapshot else {}
+
+            return Response({
+                "success": True,
+                **health,
+                "fetched_at": snapshot.fetched_at.isoformat() if snapshot else None,
+                "last_updated": snapshot.payload.get("last_updated") if snapshot else None,
+            }, status=status.HTTP_200_OK)
+
+        # Mock mode
         provider = get_provider()
         health = provider.get_integration_health()
 
@@ -182,7 +261,7 @@ def integration_health_view(request):
         logger.error(f"Error in integration_health_view: {e}", exc_info=True)
         return Response({
             "success": False,
-            "error": "Failed to retrieve database integration health.",
+            "error": "Failed to retrieve compute fleet health.",
             "detail": str(e) if settings.DEBUG else None
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -192,8 +271,21 @@ def integration_health_view(request):
 def summary_view(request):
     """
     GET /aws-costs/api/summary/
+    In real mode, reads summary KPIs from the latest DB snapshot.
     """
     try:
+        if is_real_mode():
+            snapshot = get_or_create_latest_snapshot()
+            summary = snapshot.payload.get("summary", {}) if snapshot else {}
+
+            return Response({
+                "success": True,
+                **summary,
+                "fetched_at": snapshot.fetched_at.isoformat() if snapshot else None,
+                "last_updated": snapshot.payload.get("last_updated") if snapshot else None,
+            }, status=status.HTTP_200_OK)
+
+        # Mock mode
         provider = get_provider()
         summary = provider.get_summary()
 
@@ -206,5 +298,52 @@ def summary_view(request):
         return Response({
             "success": False,
             "error": "Failed to generate AWS cost summary.",
+            "detail": str(e) if settings.DEBUG else None
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def force_refresh_view(request):
+    """
+    POST /aws-costs/api/refresh/
+    Forced telemetry refresh with a 1-hour cooldown to protect against Cost Explorer spend.
+    Staff/Authenticated users only.
+    """
+    try:
+        latest_snapshot = AwsCostSnapshot.objects.filter(status="success").first()
+        cooldown_window = timedelta(hours=1)
+        now = timezone.now()
+
+        if latest_snapshot and (now - latest_snapshot.fetched_at) < cooldown_window:
+            elapsed_minutes = int((now - latest_snapshot.fetched_at).total_seconds() // 60)
+            remaining_minutes = 60 - elapsed_minutes
+            return Response({
+                "success": False,
+                "error": f"Refresh cooldown active. Data was refreshed {elapsed_minutes}m ago. Please wait {remaining_minutes}m before triggering another AWS Cost Explorer query.",
+                "last_updated": latest_snapshot.fetched_at.isoformat(),
+                "retry_after_minutes": remaining_minutes
+            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        new_snapshot = refresh_aws_cost_snapshot(source=f"manual_api_user_{request.user.username}", force=True)
+
+        if new_snapshot.status == "success":
+            return Response({
+                "success": True,
+                "message": "AWS Cost & Infrastructure snapshot successfully refreshed from AWS.",
+                "fetched_at": new_snapshot.fetched_at.isoformat(),
+                "summary": new_snapshot.payload.get("summary", {})
+            }, status=status.HTTP_200_OK)
+        else:
+            return Response({
+                "success": False,
+                "error": f"Failed to refresh AWS Cost snapshot: {new_snapshot.error_message}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    except Exception as e:
+        logger.error(f"Error in force_refresh_view: {e}", exc_info=True)
+        return Response({
+            "success": False,
+            "error": "An unexpected error occurred during AWS snapshot refresh.",
             "detail": str(e) if settings.DEBUG else None
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

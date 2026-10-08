@@ -12,7 +12,7 @@ class AWSCostProviderTests(TestCase):
         self.provider = AWSCostProvider(region_name="ap-south-1")
 
     @patch("aws_costs.services.aws_provider.boto3.client")
-    def test_hourly_cost_success(self, mock_boto):
+    def test_hourly_cost_deprecated_success(self, mock_boto):
         mock_ce = MagicMock()
         mock_boto.return_value = mock_ce
 
@@ -39,36 +39,70 @@ class AWSCostProviderTests(TestCase):
         mock_ce.get_cost_and_usage.assert_called_once()
 
     @patch("aws_costs.services.aws_provider.boto3.client")
-    def test_daily_cost_pagination(self, mock_boto):
+    def test_daily_cost_computes_group_totals(self, mock_boto):
         mock_ce = MagicMock()
         mock_boto.return_value = mock_ce
 
-        mock_ce.get_cost_and_usage.side_effect = [
-            {
-                "ResultsByTime": [{"TimePeriod": {"Start": "2026-09-01", "End": "2026-09-02"}, "Total": {"UnblendedCost": {"Amount": "80.00", "Unit": "USD"}}, "Groups": []}],
-                "NextPageToken": "page-2-token"
-            },
-            {
-                "ResultsByTime": [{"TimePeriod": {"Start": "2026-09-02", "End": "2026-09-03"}, "Total": {"UnblendedCost": {"Amount": "85.00", "Unit": "USD"}}, "Groups": []}],
-                "NextPageToken": None
-            }
-        ]
+        mock_ce.get_cost_and_usage.return_value = {
+            "ResultsByTime": [
+                {
+                    "TimePeriod": {"Start": "2026-10-01", "End": "2026-10-02"},
+                    "Groups": [
+                        {
+                            "Keys": ["Amazon Elastic Compute Cloud - Compute"],
+                            "Metrics": {"UnblendedCost": {"Amount": "40.00", "Unit": "USD"}}
+                        },
+                        {
+                            "Keys": ["Amazon Relational Database Service"],
+                            "Metrics": {"UnblendedCost": {"Amount": "35.00", "Unit": "USD"}}
+                        }
+                    ]
+                }
+            ],
+            "NextPageToken": None
+        }
 
         res = self.provider.get_daily_cost()
-        self.assertEqual(len(res["ResultsByTime"]), 2)
-        self.assertEqual(mock_ce.get_cost_and_usage.call_count, 2)
+        self.assertEqual(len(res["ResultsByTime"]), 1)
+        day_entry = res["ResultsByTime"][0]
+        self.assertIn("Total", day_entry)
+        self.assertEqual(day_entry["Total"]["UnblendedCost"]["Amount"], "75.00")
+
+    @patch("aws_costs.services.aws_provider.boto3.client")
+    def test_cost_by_service_slices_daily_without_extra_ce_call(self, mock_boto):
+        mock_ce = MagicMock()
+        mock_boto.return_value = mock_ce
+
+        mock_ce.get_cost_and_usage.return_value = {
+            "ResultsByTime": [
+                {
+                    "TimePeriod": {"Start": "2026-10-01", "End": "2026-10-02"},
+                    "Groups": [
+                        {"Keys": ["Amazon EC2"], "Metrics": {"UnblendedCost": {"Amount": "10.00"}}},
+                        {"Keys": ["Amazon RDS"], "Metrics": {"UnblendedCost": {"Amount": "20.00"}}}
+                    ]
+                }
+            ],
+            "NextPageToken": None
+        }
+
+        # get_cost_by_service should call get_daily_cost internally
+        res = self.provider.get_cost_by_service()
+        self.assertEqual(res["total_cost"], 30.00)
+        self.assertEqual(len(res["services"]), 2)
+        self.assertEqual(res["services"][0]["service"], "Amazon RDS")
+        self.assertEqual(res["services"][0]["amount"], 20.00)
+        # Should only have made 1 CE call
+        self.assertEqual(mock_ce.get_cost_and_usage.call_count, 1)
 
     @patch("aws_costs.services.aws_provider.boto3.client")
     def test_running_resources_aggregation(self, mock_boto):
         mock_ec2 = MagicMock()
-        mock_rds = MagicMock()
         mock_lam = MagicMock()
 
         def client_side_effect(service, **kwargs):
             if service == "ec2":
                 return mock_ec2
-            if service == "rds":
-                return mock_rds
             if service == "lambda":
                 return mock_lam
             return MagicMock()
@@ -91,18 +125,6 @@ class AWSCostProviderTests(TestCase):
             ]
         }
 
-        mock_rds.describe_db_instances.return_value = {
-            "DBInstances": [
-                {
-                    "DBInstanceIdentifier": "test-rds-db",
-                    "DBInstanceStatus": "available",
-                    "DBInstanceClass": "db.m6g.xlarge",
-                    "Engine": "postgres",
-                    "AvailabilityZone": "ap-south-1a"
-                }
-            ]
-        }
-
         mock_lam.list_functions.return_value = {
             "Functions": [
                 {
@@ -115,10 +137,9 @@ class AWSCostProviderTests(TestCase):
         }
 
         resources = self.provider.get_running_resources()
-        self.assertEqual(len(resources), 3)
+        self.assertEqual(len(resources), 2)
         types = [r["type"] for r in resources]
         self.assertIn("EC2 Instance", types)
-        self.assertIn("RDS Instance", types)
         self.assertIn("Lambda Function", types)
 
     @patch("aws_costs.services.aws_provider.boto3.client")

@@ -377,63 +377,33 @@ export const apiService = {
    * AWS Cost & Usage Monitoring APIs
    */
   async getAwsCostSummary(): Promise<any | null> {
-    try {
-      const rootUrl = API_BASE_URL.replace(/\/api\/?$/, '');
-      const response = await fetch(`${rootUrl}/aws-costs/api/summary/`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return await response.json();
-    } catch (e) {
-      console.warn('[AWS Costs] Summary fetch failed:', e);
-      return null;
-    }
+    return await fetchFromBackend('/aws-costs/api/summary/');
   },
 
   async getAwsHourlyCosts(hours = 24): Promise<any | null> {
-    try {
-      const rootUrl = API_BASE_URL.replace(/\/api\/?$/, '');
-      const response = await fetch(`${rootUrl}/aws-costs/api/hourly/?hours=${hours}`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return await response.json();
-    } catch (e) {
-      console.warn('[AWS Costs] Hourly fetch failed:', e);
-      return null;
-    }
+    return await fetchFromBackend(`/aws-costs/api/hourly/?hours=${hours}`);
   },
 
   async getAwsDailyCosts(days = 30): Promise<any | null> {
-    try {
-      const rootUrl = API_BASE_URL.replace(/\/api\/?$/, '');
-      const response = await fetch(`${rootUrl}/aws-costs/api/daily/?days=${days}`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return await response.json();
-    } catch (e) {
-      console.warn('[AWS Costs] Daily fetch failed:', e);
-      return null;
-    }
+    return await fetchFromBackend(`/aws-costs/api/daily/?days=${days}`);
   },
 
   async getAwsCostByService(days = 7): Promise<any | null> {
-    try {
-      const rootUrl = API_BASE_URL.replace(/\/api\/?$/, '');
-      const response = await fetch(`${rootUrl}/aws-costs/api/by-service/?days=${days}`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return await response.json();
-    } catch (e) {
-      console.warn('[AWS Costs] By-service fetch failed:', e);
-      return null;
-    }
+    return await fetchFromBackend(`/aws-costs/api/by-service/?days=${days}`);
   },
 
   async getAwsRunningServices(): Promise<any | null> {
-    try {
-      const rootUrl = API_BASE_URL.replace(/\/api\/?$/, '');
-      const response = await fetch(`${rootUrl}/aws-costs/api/running-services/`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return await response.json();
-    } catch (e) {
-      console.warn('[AWS Costs] Running services fetch failed:', e);
-      return null;
-    }
+    return await fetchFromBackend('/aws-costs/api/running-services/');
+  },
+
+  async refreshAwsCostSnapshot(): Promise<any | null> {
+    return await fetchFromBackend('/aws-costs/api/refresh/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      }
+    });
   }
 };
 

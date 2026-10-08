@@ -733,16 +733,19 @@ def get_live_integration_health(filters: Optional[Dict[str, Any]] = None) -> Dic
 
         # 3. Filter records for data structure & service name if specified
         structure_matched_recs = all_h_recs
-        if ds_target:
-            structure_matched_recs = [
-                r for r in structure_matched_recs
-                if str(r.get("DataStructureName") or "").lower().replace("_", "").replace(" ", "") == ds_target
-            ]
         if service_target:
             structure_matched_recs = [
                 r for r in structure_matched_recs
                 if service_target in str(r.get("ServiceName") or "").lower()
             ]
+        if ds_target:
+            structure_matched_recs = [
+                r for r in structure_matched_recs
+                if str(r.get("DataStructureName") or "").lower().replace("_", "").replace(" ", "") == ds_target
+            ]
+
+        if (service_target or ds_target) and not structure_matched_recs:
+            continue
 
         # 4. Filter records for selected Date Window (e.g. Today)
         date_matched_recs = []
@@ -755,19 +758,40 @@ def get_live_integration_health(filters: Optional[Dict[str, Any]] = None) -> Dic
                 continue
             date_matched_recs.append(r)
 
+        # Find the latest record where actual patient/clinical data rows were transferred
+        latest_data_rec = next((r for r in structure_matched_recs if int(r.get("RecordsProcessed") or 0) > 0), None)
+        if not latest_data_rec:
+            latest_data_rec = next((r for r in all_h_recs if int(r.get("RecordsProcessed") or 0) > 0), None)
+
         # Decide active record set & volume
         if date_matched_recs:
             active_recs = date_matched_recs
-            latest_rec = date_matched_recs[0]
+            date_data_rec = next((r for r in date_matched_recs if int(r.get("RecordsProcessed") or 0) > 0), None)
             h_proc = sum(int(r.get("RecordsProcessed") or 0) for r in date_matched_recs)
             h_avail = sum(int(r.get("RecordsAvailable") or 0) for r in date_matched_recs)
+
+            if date_data_rec:
+                latest_rec = date_data_rec
+            elif h_proc == 0 and latest_data_rec:
+                # If selected date window had 0 rows transferred, display the last actual non-zero data batch
+                latest_rec = latest_data_rec
+                h_proc = int(latest_data_rec.get("RecordsProcessed") or 0)
+                h_avail = int(latest_data_rec.get("RecordsAvailable") or 0)
+            else:
+                latest_rec = date_matched_recs[0]
         else:
             # Hospital hasn't synced in the selected date window (e.g. today):
-            # Retain in dashboard as Delayed / Needs Sync using its latest known state
-            active_recs = structure_matched_recs if structure_matched_recs else all_h_recs
-            latest_rec = active_recs[0]
-            h_proc = 0
-            h_avail = 0
+            # Retain in dashboard using its latest non-zero data state (fallback to latest known record)
+            if latest_data_rec:
+                active_recs = [latest_data_rec]
+                latest_rec = latest_data_rec
+                h_proc = int(latest_data_rec.get("RecordsProcessed") or 0)
+                h_avail = int(latest_data_rec.get("RecordsAvailable") or 0)
+            else:
+                active_recs = structure_matched_recs if structure_matched_recs else all_h_recs
+                latest_rec = active_recs[0]
+                h_proc = 0
+                h_avail = 0
 
         total_records_sum += h_proc
         h_vol = round(h_proc * 0.018, 2)

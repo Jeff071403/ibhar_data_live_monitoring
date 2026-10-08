@@ -160,4 +160,9 @@ AWS_COST_MODE = os.getenv('AWS_COST_MODE', 'mock')
 AWS_REGION = os.getenv('AWS_REGION', 'ap-south-1')
 AWS_COST_CACHE_TTL_HOURLY = int(os.getenv('AWS_COST_CACHE_TTL_HOURLY', '900'))
 AWS_COST_CACHE_TTL_DAILY = int(os.getenv('AWS_COST_CACHE_TTL_DAILY', '21600'))
-AWS_COST_RDS_INSTANCE_ID = os.getenv('AWS_COST_RDS_INSTANCE_ID', '')
+
+# Auto-normalize AWS credentials in environment if present
+if os.getenv('AWS_ACCESS_KEY_ID'):
+    os.environ['AWS_ACCESS_KEY_ID'] = os.getenv('AWS_ACCESS_KEY_ID', '').strip().upper()
+if os.getenv('AWS_SECRET_ACCESS_KEY'):
+    os.environ['AWS_SECRET_ACCESS_KEY'] = os.getenv('AWS_SECRET_ACCESS_KEY', '').strip()

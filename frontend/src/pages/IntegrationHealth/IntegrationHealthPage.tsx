@@ -1,13 +1,14 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { useMonitoring } from '../../hooks/useMonitoring';
+import { useMonitoring, mergeWithPersistedNonZeroRecords } from '../../hooks/useMonitoring';
 import type { IntegrationHealthLog, IntegrationHealthResponse, IntegrationTrendPoint, HealthTrendPoint } from '../../types';
 import { apiService } from '../../services/api';
 import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { CopyButton } from '../../components/common/CopyButton';
 import { MetricMiniCard } from '../../components/cards/MetricMiniCard';
+import { computeDelayMinutes, getHospitalLiveStatus, getStoredThresholds } from '../../utils/monitoring';
 import {
   CheckCircle2,
   AlertTriangle,
@@ -168,38 +169,48 @@ const HealthSparklineCell: React.FC<{ points?: HealthTrendPoint[] }> = ({ points
   );
 };
 
-export const DATA_STRUCTURE_OPTIONS = [
-  'ALL',
-  'ANTIBIOTICS_DISPENSED',
-  'ANTIBIOTICS_RETURNED',
-  'AREA_MASTER',
-  'AST_ANTIBIOTIC_DATA',
-  'AST_DEMOGRAPHIC_DATA',
-  'CULTURE_HEADER',
-  'CULTURE_REQUEST',
-  'DEMOGRAPHIC_DATA',
-  'IN_ANBX_DISP_INFO',
-  'IN_ANBX_RETN_INFO',
-  'IN_PATIENT_INFO',
-  'IN_SURG_INFO',
-  'IPD_DATA',
-  'IPD_TRANSFER_DATA',
-  'OPD_DATA',
-  'PATIENT_DATA',
-  'PATIENT_DISCHARGE',
-  'PATIENT ENCOUNTER',
-  'PATIENT_HEADER',
-  'PATIENT_TRANSFER',
-  'SURGERY_INFORMATION',
-  'USER_MASTER',
-  'VITEK_AST_DATA'
-] as const;
+export const SERVICE_TO_DATA_STRUCTURE_MAP: Record<string, string[]> = {
+  'GENERAL Process Data Entities': [
+    'ANTIBIOTICS_DISPENSED',
+    'ANTIBIOTICS_RETURNED',
+    'AREA_MASTER',
+    'AST_ANTIBIOTIC_DATA',
+    'AST_DEMOGRAPHIC_DATA',
+    'CULTURE_HEADER',
+    'CULTURE_REQUEST',
+    'DEMOGRAPHIC_DATA',
+    'IN_ANBX_DISP_INFO',
+    'IN_ANBX_RETN_INFO',
+    'IN_PATIENT_INFO',
+    'IN_SURG_INFO',
+    'IPD_DATA',
+    'IPD_TRANSFER_DATA',
+    'OPD_DATA',
+    'PATIENT_DATA',
+    'PATIENT_DISCHARGE',
+    'PATIENT_ENCOUNTER',
+    'PATIENT_HEADER',
+    'PATIENT_TRANSFER',
+    'SURGERY_INFORMATION',
+    'USER_MASTER',
+    'VITEK_AST_DATA'
+  ],
+  'VAMR Process Data Entities': [
+    'DEMOGRAPHIC_DATA'
+  ]
+};
 
 export const SERVICE_NAME_OPTIONS = [
   'ALL',
   'GENERAL Process Data Entities',
   'VAMR Process Data Entities'
 ] as const;
+
+export const ALL_DATA_STRUCTURES: string[] = Array.from(
+  new Set(Object.values(SERVICE_TO_DATA_STRUCTURE_MAP).flat())
+).sort();
+
+export const DATA_STRUCTURE_OPTIONS = ['ALL', ...ALL_DATA_STRUCTURES] as const;
 
 export const IntegrationHealthPage: React.FC = () => {
   const {
@@ -209,7 +220,8 @@ export const IntegrationHealthPage: React.FC = () => {
     manualRefresh,
     isLoading: isGlobalLoading,
     isBackendConnected,
-    apiError
+    apiError,
+    thresholdVersion
   } = useMonitoring();
 
   const [filteredHealthData, setFilteredHealthData] = useState<IntegrationHealthResponse | null>(null);
@@ -217,11 +229,30 @@ export const IntegrationHealthPage: React.FC = () => {
 
   // Filter States
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedDataStructure, setSelectedDataStructure] = useState<string>('ALL');
   const [selectedServiceName, setSelectedServiceName] = useState<string>('ALL');
+  const [selectedDataStructure, setSelectedDataStructure] = useState<string>('ALL');
   const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+
+  // Dynamically compute available data structures based on selected parent service
+  const availableDataStructures = useMemo(() => {
+    if (selectedServiceName !== 'ALL' && SERVICE_TO_DATA_STRUCTURE_MAP[selectedServiceName]) {
+      return SERVICE_TO_DATA_STRUCTURE_MAP[selectedServiceName];
+    }
+    return ALL_DATA_STRUCTURES;
+  }, [selectedServiceName]);
+
+  // Handle service change and reset data structure if current selection is invalid for new service
+  const handleServiceChange = (service: string) => {
+    setSelectedServiceName(service);
+    if (service !== 'ALL') {
+      const allowed = SERVICE_TO_DATA_STRUCTURE_MAP[service] || [];
+      if (selectedDataStructure !== 'ALL' && !allowed.includes(selectedDataStructure)) {
+        setSelectedDataStructure('ALL');
+      }
+    }
+  };
 
   // Fetch filtered health data whenever backend filters change
   const fetchFilteredData = useCallback(async () => {
@@ -240,7 +271,11 @@ export const IntegrationHealthPage: React.FC = () => {
         search: searchQuery.trim() || undefined
       });
       if (res && res.success !== false) {
-        setFilteredHealthData(res);
+        const mergedData = mergeWithPersistedNonZeroRecords(res.data || []);
+        setFilteredHealthData({
+          ...res,
+          data: mergedData,
+        });
       }
     } catch (e) {
       console.error('[IntegrationHealth] Date filter fetch error:', e);
@@ -313,11 +348,9 @@ export const IntegrationHealthPage: React.FC = () => {
     });
   }, [logs, selectedDataStructure, selectedServiceName, selectedStatus, startDate, endDate, searchQuery]);
 
-  // Dynamically derive all KPI metrics directly from active API response & filter selections
+  // Dynamically derive all KPI metrics directly from active API response, dynamic thresholds & filter selections
   const summary = useMemo(() => {
-    if (!hasActiveFilters && activeData?.summary && displayLogs.length === logs.length) {
-      return activeData.summary;
-    }
+    const { customThresholds, globalThresh } = getStoredThresholds();
 
     let receiving = 0;
     let delayed = 0;
@@ -335,20 +368,22 @@ export const IntegrationHealthPage: React.FC = () => {
       const hId = log.hospital_id || log.hospital_code || '';
       if (hId) uniqueHospitals.add(hId);
 
-      const st = (log.integration_status || log.status || '').toUpperCase();
-      if (st === 'RECEIVING' || st === 'SUCCESS' || st === 'HEALTHY') {
+      const delay = computeDelayMinutes(log.received_at || log.start_time, log.delay_minutes);
+      const threshold = customThresholds[hId] || globalThresh;
+      const statusInfo = getHospitalLiveStatus(delay, threshold);
+      const hasError = log.status === 'ERROR' || log.integration_status === 'FAILED' || Boolean(log.error_message);
+
+      if (hasError || statusInfo.label === 'CRITICAL') {
+        failed++;
+      } else if (statusInfo.label === 'DELAYED') {
+        delayed++;
+      } else {
         receiving++;
         if (log.received_at) {
           if (!lastSuccessful || new Date(log.received_at) > new Date(lastSuccessful)) {
             lastSuccessful = log.received_at;
           }
         }
-      } else if (st === 'DELAYED' || (log.delay_minutes && log.delay_minutes > 30)) {
-        delayed++;
-      } else if (st === 'FAILED' || st === 'ERROR' || st === 'CRITICAL' || Boolean(log.error_message)) {
-        failed++;
-      } else {
-        unknown++;
       }
 
       const recs = log.record_count ?? log.records_processed ?? log.records_available ?? 0;
@@ -376,9 +411,12 @@ export const IntegrationHealthPage: React.FC = () => {
       total_records: totalRecords,
       total_volume_mb: Math.round(totalVolume * 100) / 100,
       average_response_time_ms: respTimeCount > 0 ? Math.round(totalRespTime / respTimeCount) : (activeData?.summary?.average_response_time_ms || 0),
+      average_duration_seconds: activeData?.summary?.average_duration_seconds ?? (respTimeCount > 0 ? Math.round((totalRespTime / respTimeCount) / 10) / 100 : 0.08),
+      latest_start_time: activeData?.summary?.latest_start_time || lastSuccessful,
+      latest_end_time: activeData?.summary?.latest_end_time || lastSuccessful,
       last_successful_ingestion: lastSuccessful
     };
-  }, [displayLogs, logs.length, hasActiveFilters, activeData]);
+  }, [displayLogs, activeData, thresholdVersion]);
 
   // Dynamic sparklines derived from actual API log data
   const recordsSparkline = useMemo(() => {
@@ -441,8 +479,8 @@ export const IntegrationHealthPage: React.FC = () => {
 
   const handleClearFilters = () => {
     setSearchQuery('');
-    setSelectedDataStructure('ALL');
     setSelectedServiceName('ALL');
+    setSelectedDataStructure('ALL');
     setSelectedStatus('ALL');
     setStartDate('');
     setEndDate('');
@@ -555,7 +593,24 @@ export const IntegrationHealthPage: React.FC = () => {
             </div>
           </div>
 
-          {/* 2. Data Structure Dropdown */}
+          {/* 2. Service Name Dropdown (Superset) */}
+          <div className="space-y-1">
+            <label className="text-[11px] font-black uppercase text-slate-500 dark:text-slate-400">
+              Service Name
+            </label>
+            <select
+              value={selectedServiceName}
+              onChange={e => handleServiceChange(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-sans font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer"
+            >
+              <option value="ALL">All Services</option>
+              {SERVICE_NAME_OPTIONS.filter(s => s !== 'ALL').map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* 3. Data Structure Dropdown (Dependent Subset) */}
           <div className="space-y-1">
             <label className="text-[11px] font-black uppercase text-slate-500 dark:text-slate-400">
               Data Structure
@@ -565,26 +620,13 @@ export const IntegrationHealthPage: React.FC = () => {
               onChange={e => setSelectedDataStructure(e.target.value)}
               className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-sans font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer"
             >
-              <option value="ALL">All Data Structures ({DATA_STRUCTURE_OPTIONS.length - 1})</option>
-              {DATA_STRUCTURE_OPTIONS.filter(ds => ds !== 'ALL').map(ds => (
+              <option value="ALL">
+                {selectedServiceName === 'ALL'
+                  ? `All Data Structures (${availableDataStructures.length})`
+                  : `All ${selectedServiceName.includes('VAMR') ? 'VAMR' : 'GENERAL'} Structures (${availableDataStructures.length})`}
+              </option>
+              {availableDataStructures.map(ds => (
                 <option key={ds} value={ds}>{ds}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* 3. Service Name Dropdown */}
-          <div className="space-y-1">
-            <label className="text-[11px] font-black uppercase text-slate-500 dark:text-slate-400">
-              Service Name
-            </label>
-            <select
-              value={selectedServiceName}
-              onChange={e => setSelectedServiceName(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-sans font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer"
-            >
-              <option value="ALL">All Services</option>
-              {SERVICE_NAME_OPTIONS.filter(s => s !== 'ALL').map(s => (
-                <option key={s} value={s}>{s}</option>
               ))}
             </select>
           </div>
@@ -635,8 +677,8 @@ export const IntegrationHealthPage: React.FC = () => {
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-extrabold text-blue-600 dark:text-blue-400">Active Filters:</span>
               {searchQuery && <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800">Search: "{searchQuery}"</span>}
-              {selectedDataStructure !== 'ALL' && <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800">Data Structure: {selectedDataStructure}</span>}
               {selectedServiceName !== 'ALL' && <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800">Service: {selectedServiceName}</span>}
+              {selectedDataStructure !== 'ALL' && <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800">Data Structure: {selectedDataStructure}</span>}
               {selectedStatus !== 'ALL' && <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800">Status: {selectedStatus}</span>}
               {startDate && <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800">From: {startDate}</span>}
               {endDate && <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800">To: {endDate}</span>}
@@ -810,8 +852,8 @@ export const IntegrationHealthPage: React.FC = () => {
                   Hospital Name
                 </th>
 
-                <th className="py-3.5 px-3.5 w-[150px] min-w-[150px]">Data Structure</th>
                 <th className="py-3.5 px-3.5 w-[170px] min-w-[170px]">Service Name</th>
+                <th className="py-3.5 px-3.5 w-[150px] min-w-[150px]">Data Structure</th>
                 <th className="py-3.5 px-3.5 w-[145px] min-w-[145px]">Last Received</th>
                 <th className="py-3.5 px-3.5 w-[90px] min-w-[90px] text-right">Delay</th>
                 <th className="py-3.5 px-3.5 w-[110px] min-w-[110px] text-right">Processed Rows</th>
@@ -848,83 +890,94 @@ export const IntegrationHealthPage: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                displayLogs.map(log => (
-                  <tr key={log.id} className="group hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                    {/* Sticky Cell 1: Hospital ID */}
-                    <td className="py-3.5 px-3.5 w-[110px] min-w-[110px] font-mono font-bold sticky left-0 z-10 bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-800 transition-colors shadow-[1px_0_0_0_rgba(226,232,240,1)] dark:shadow-[1px_0_0_0_rgba(30,41,59,1)]">
-                      <CopyButton text={log.hospital_id} />
-                    </td>
+                displayLogs.map(log => {
+                  const { customThresholds, globalThresh } = getStoredThresholds();
+                  const delay = computeDelayMinutes(log.received_at || log.start_time, log.delay_minutes);
+                  const hId = log.hospital_id || log.hospital_code || '';
+                  const threshold = customThresholds[hId] || globalThresh;
+                  const statusInfo = getHospitalLiveStatus(delay, threshold);
+                  const isErr = log.status === 'ERROR' || Boolean(log.error_message);
+                  const effectiveStatus = isErr || statusInfo.label === 'CRITICAL' ? 'FAILED' : statusInfo.label === 'DELAYED' ? 'DELAYED' : 'RECEIVING';
 
-                    {/* Sticky Cell 2: Hospital Name */}
-                    <td className="py-3.5 px-3.5 w-[220px] min-w-[220px] font-bold text-slate-900 dark:text-white leading-snug whitespace-normal break-words sticky left-[110px] z-10 bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-800 transition-colors shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
-                      <Link to={`/hospitals/${log.hospital_id}`} className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
-                        {log.hospital_name}
-                      </Link>
-                    </td>
+                  return (
+                    <tr key={log.id} className="group hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                      {/* Sticky Cell 1: Hospital ID */}
+                      <td className="py-3.5 px-3.5 w-[110px] min-w-[110px] font-mono font-bold sticky left-0 z-10 bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-800 transition-colors shadow-[1px_0_0_0_rgba(226,232,240,1)] dark:shadow-[1px_0_0_0_rgba(30,41,59,1)]">
+                        <CopyButton text={log.hospital_id} />
+                      </td>
 
-                    <td className="py-3.5 px-3.5 w-[150px] min-w-[150px] font-mono">
-                      <span className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 font-extrabold text-[11px] inline-block truncate max-w-[140px]" title={log.data_structure || log.data_type}>
-                        {log.data_structure || log.data_type}
-                      </span>
-                    </td>
+                      {/* Sticky Cell 2: Hospital Name */}
+                      <td className="py-3.5 px-3.5 w-[220px] min-w-[220px] font-bold text-slate-900 dark:text-white leading-snug whitespace-normal break-words sticky left-[110px] z-10 bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-800 transition-colors shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                        <Link to={`/hospitals/${log.hospital_id}`} className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+                          {log.hospital_name}
+                        </Link>
+                      </td>
 
-                    <td className="py-3.5 px-3.5 w-[170px] min-w-[170px] font-mono text-[11px] text-slate-600 dark:text-slate-300 truncate max-w-[160px]" title={log.service_name || 'GENERAL Process Data Entities'}>
-                      {log.service_name || 'GENERAL Process Data Entities'}
-                    </td>
+                      <td className="py-3.5 px-3.5 w-[170px] min-w-[170px] font-mono text-[11px] text-slate-600 dark:text-slate-300 truncate max-w-[160px]" title={log.service_name || 'GENERAL Process Data Entities'}>
+                        {log.service_name || 'GENERAL Process Data Entities'}
+                      </td>
 
-                    <td className="py-3.5 px-3.5 w-[145px] min-w-[145px] font-mono whitespace-nowrap">
-                      {formatTimestamp(log.received_at)}
-                    </td>
+                      <td className="py-3.5 px-3.5 w-[150px] min-w-[150px] font-mono">
+                        <span className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 font-extrabold text-[11px] inline-block truncate max-w-[140px]" title={log.data_structure || log.data_type}>
+                          {log.data_structure || log.data_type}
+                        </span>
+                      </td>
 
-                    <td className={`py-3.5 px-3.5 w-[90px] min-w-[90px] text-right font-mono font-bold ${
-                      log.delay_minutes > 30 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
-                    }`}>
-                      {log.delay_minutes} min
-                    </td>
+                      <td className="py-3.5 px-3.5 w-[145px] min-w-[145px] font-mono whitespace-nowrap">
+                        {formatTimestamp(log.received_at)}
+                      </td>
 
-                    <td className="py-3.5 px-3.5 w-[110px] min-w-[110px] text-right font-mono font-bold text-slate-900 dark:text-white">
-                      {(log.record_count ?? log.records_processed ?? 0).toLocaleString()} <span className="text-[10px] font-normal text-slate-400">rows</span>
-                    </td>
+                      <td className={`py-3.5 px-3.5 w-[90px] min-w-[90px] text-right font-mono font-bold ${
+                        effectiveStatus === 'FAILED' ? 'text-rose-600 dark:text-rose-400' :
+                        effectiveStatus === 'DELAYED' ? 'text-amber-600 dark:text-amber-400' :
+                        'text-emerald-600 dark:text-emerald-400'
+                      }`}>
+                        {delay} min
+                      </td>
 
-                    <td className="py-3.5 px-3.5 w-[130px] min-w-[130px] text-right font-mono font-bold">
-                      <div className="text-slate-900 dark:text-white">
-                        {log.duration_seconds !== undefined ? `${log.duration_seconds}s` : `${log.response_time_ms} ms`}
-                      </div>
-                      <div className="text-[10px] text-slate-400 font-normal truncate max-w-[125px]" title={log.start_time && log.end_time ? `Start: ${formatTimestamp(log.start_time)} | End: ${formatTimestamp(log.end_time)}` : `${log.response_time_ms}ms`}>
-                        {log.start_time && log.end_time 
-                          ? `${(log.start_time.split('T')[1] || log.start_time).substring(0, 8)} - ${(log.end_time.split('T')[1] || log.end_time).substring(0, 8)}` 
-                          : `${log.response_time_ms}ms`}
-                      </div>
-                    </td>
+                      <td className="py-3.5 px-3.5 w-[110px] min-w-[110px] text-right font-mono font-bold text-slate-900 dark:text-white">
+                        {(log.record_count ?? log.records_processed ?? 0).toLocaleString()} <span className="text-[10px] font-normal text-slate-400">rows</span>
+                      </td>
 
-                    <td className="py-3.5 px-3.5 w-[120px] min-w-[120px] text-center">
-                      <Badge
-                        status={
-                          log.integration_status === 'RECEIVING' ? 'healthy' :
-                          log.integration_status === 'DELAYED' ? 'delayed' :
-                          log.integration_status === 'FAILED' ? 'critical' : 'offline'
-                        }
-                        size="sm"
-                        customLabel={log.integration_status}
-                      />
-                    </td>
+                      <td className="py-3.5 px-3.5 w-[130px] min-w-[130px] text-right font-mono font-bold">
+                        <div className="text-slate-900 dark:text-white">
+                          {log.duration_seconds !== undefined ? `${log.duration_seconds}s` : `${log.response_time_ms} ms`}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-normal truncate max-w-[125px]" title={log.start_time && log.end_time ? `Start: ${formatTimestamp(log.start_time)} | End: ${formatTimestamp(log.end_time)}` : `${log.response_time_ms}ms`}>
+                          {log.start_time && log.end_time 
+                            ? `${(log.start_time.split('T')[1] || log.start_time).substring(0, 8)} - ${(log.end_time.split('T')[1] || log.end_time).substring(0, 8)}` 
+                            : `${log.response_time_ms}ms`}
+                        </div>
+                      </td>
 
-                    <td className="py-3.5 px-3.5 w-[160px] min-w-[160px] text-center align-middle">
-                      <SparklineCell points={log.trend_points} />
-                    </td>
+                      <td className="py-3.5 px-3.5 w-[120px] min-w-[120px] text-center">
+                        <Badge
+                          status={
+                            effectiveStatus === 'RECEIVING' ? 'healthy' :
+                            effectiveStatus === 'DELAYED' ? 'delayed' : 'critical'
+                          }
+                          size="sm"
+                          customLabel={effectiveStatus}
+                        />
+                      </td>
 
-                    <td className="py-3.5 px-3.5 w-[180px] min-w-[180px] text-center align-middle">
-                      <HealthSparklineCell points={log.health_trend_points} />
-                    </td>
+                      <td className="py-3.5 px-3.5 w-[160px] min-w-[160px] text-center align-middle">
+                        <SparklineCell points={log.trend_points} />
+                      </td>
 
-                    <td
-                      className="py-3.5 px-3.5 w-[240px] min-w-[240px] text-rose-600 dark:text-rose-400 font-mono text-[11px] whitespace-normal break-words line-clamp-2 leading-tight"
-                      title={log.error_message || undefined}
-                    >
-                      {log.error_message || '—'}
-                    </td>
-                  </tr>
-                ))
+                      <td className="py-3.5 px-3.5 w-[180px] min-w-[180px] text-center align-middle">
+                        <HealthSparklineCell points={log.health_trend_points} />
+                      </td>
+
+                      <td
+                        className="py-3.5 px-3.5 w-[240px] min-w-[240px] text-rose-600 dark:text-rose-400 font-mono text-[11px] whitespace-normal break-words line-clamp-2 leading-tight"
+                        title={log.error_message || undefined}
+                      >
+                        {log.error_message || '—'}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

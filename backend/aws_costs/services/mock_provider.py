@@ -41,15 +41,12 @@ class MockCostProvider(CostProvider):
         Stable based on day and hour.
         """
         hour = dt.hour
-        # Peak hospital activity between 09:00 and 19:00
         cycle = math.sin((hour - 6) / 24.0 * 2 * math.pi)
-        base = 2.40 + max(0.0, cycle) * 1.80  # ~$2.40/hr up to ~$4.20/hr
+        base = 2.40 + max(0.0, cycle) * 1.80
 
-        # Seeded random variation per hour for realistic jitter
         rng = random.Random(int(dt.timestamp()) // 3600 + self.seed)
         jitter = rng.uniform(-0.15, 0.25)
         
-        # Occasional realistic micro-spike (e.g. at 14:00 yesterday or specific hour)
         if dt.day % 3 == 0 and hour in (14, 15):
             jitter += rng.uniform(0.8, 1.6)
 
@@ -57,16 +54,8 @@ class MockCostProvider(CostProvider):
 
     def get_hourly_cost(self, start: Optional[datetime] = None, end: Optional[datetime] = None) -> Dict[str, Any]:
         """
-        Matches AWS Cost Explorer GetCostAndUsage response:
-        {
-          "ResultsByTime": [
-            {
-              "TimePeriod": {"Start": "2026-10-04T12:00:00Z", "End": "2026-10-04T13:00:00Z"},
-              "Total": {"UnblendedCost": {"Amount": "3.4567", "Unit": "USD"}},
-              "Groups": [ ... ]
-            }
-          ]
-        }
+        DEPRECATED: Matches AWS Cost Explorer GetCostAndUsage response with Granularity='HOURLY'.
+        Retained for backwards compatibility.
         """
         now = end or timezone.now().replace(minute=0, second=0, microsecond=0)
         start_time = start or (now - timedelta(hours=24))
@@ -130,12 +119,10 @@ class MockCostProvider(CostProvider):
         curr = start_date
         while curr <= now:
             nxt = curr + timedelta(days=1)
-            # Base daily cost around $72 - $98 with weekly pattern
             weekday_mult = 1.15 if curr.weekday() < 5 else 0.85
             rng = random.Random(curr.toordinal() + self.seed)
             day_total = (78.0 + rng.uniform(-6.0, 12.0)) * weekday_mult
             
-            # An occasional spike 5 days ago for realistic analysis
             if curr == (now - timedelta(days=5)):
                 day_total += 35.50
 
@@ -181,13 +168,23 @@ class MockCostProvider(CostProvider):
     def get_cost_by_service(self, start: Optional[datetime] = None, end: Optional[datetime] = None) -> Dict[str, Any]:
         """
         Aggregates total spend by AWS service over the requested window (default past 7 days).
+        Slices the cached 30-day daily result to avoid redundant invocations.
         """
-        daily_res = self.get_daily_cost(start=start or (timezone.now().date() - timedelta(days=7)), end=end)
+        start_date = start or (timezone.now().date() - timedelta(days=7))
+        if isinstance(start_date, datetime):
+            start_date = start_date.date()
+        start_str = start_date.strftime("%Y-%m-%d")
+
+        daily_res = self.get_daily_cost()
+        all_days = daily_res.get("ResultsByTime", [])
+        sliced_days = [d for d in all_days if d.get("TimePeriod", {}).get("Start", "") >= start_str]
+        if not sliced_days and all_days:
+            sliced_days = all_days[-7:]
         
         service_totals: Dict[str, float] = {}
         grand_total = 0.0
 
-        for day_entry in daily_res.get("ResultsByTime", []):
+        for day_entry in sliced_days:
             for group in day_entry.get("Groups", []):
                 srv_name = group["Keys"][0]
                 amt = float(group["Metrics"]["UnblendedCost"]["Amount"])
@@ -202,8 +199,8 @@ class MockCostProvider(CostProvider):
         )
 
         return {
-            "start": daily_res["ResultsByTime"][0]["TimePeriod"]["Start"] if daily_res["ResultsByTime"] else "",
-            "end": daily_res["ResultsByTime"][-1]["TimePeriod"]["End"] if daily_res["ResultsByTime"] else "",
+            "start": sliced_days[0]["TimePeriod"]["Start"] if sliced_days else "",
+            "end": sliced_days[-1]["TimePeriod"]["End"] if sliced_days else "",
             "total_cost": grand_total,
             "unit": "USD",
             "services": sorted_services,
@@ -217,12 +214,27 @@ class MockCostProvider(CostProvider):
         now = timezone.now()
         year, month = now.year, now.month
         num_days = calendar.monthrange(year, month)[1]
-        days_passed = max(1, now.day)
         
-        # MTD calculated from days passed
-        daily_avg = 82.50
-        mtd_cost = round(days_passed * daily_avg + random.Random(self.seed).uniform(-10.0, 15.0), 2)
-        projected_total = round(mtd_cost + ((num_days - days_passed) * daily_avg), 2)
+        # MTD calculated from daily data in current month
+        daily_res = self.get_daily_cost()
+        current_month_prefix = now.strftime("%Y-%m")
+        mtd_cost = 0.0
+        for day_entry in daily_res.get("ResultsByTime", []):
+            if day_entry.get("TimePeriod", {}).get("Start", "").startswith(current_month_prefix):
+                try:
+                    amt = float(day_entry.get("Total", {}).get("UnblendedCost", {}).get("Amount", 0.0))
+                    mtd_cost += amt
+                except (ValueError, TypeError):
+                    pass
+        
+        if mtd_cost <= 0.0:
+            days_passed = max(1, now.day)
+            daily_avg = 82.50
+            mtd_cost = round(days_passed * daily_avg + random.Random(self.seed).uniform(-10.0, 15.0), 2)
+
+        days_passed = max(1, now.day)
+        daily_rate = mtd_cost / days_passed
+        projected_total = round(mtd_cost + ((num_days - days_passed) * daily_rate), 2)
         budget_limit = 2800.00
         budget_percent = round((mtd_cost / budget_limit) * 100, 1)
 
@@ -254,48 +266,38 @@ class MockCostProvider(CostProvider):
 
     def get_running_resources(self) -> List[Dict[str, Any]]:
         """
-        Returns list of running AWS resources across EC2, RDS, and Lambda.
+        Returns list of running AWS resources across EC2 instances and Lambda functions.
         """
         return [
             {
-                "type": "RDS Instance",
-                "id": "ibhar-prod-postgres-db",
-                "name": "IBHAR Clinical DB Primary",
-                "region": "ap-south-1a",
-                "state": "available",
-                "state_color": "green",
-                "details": "db.m6g.xlarge | Multi-AZ | PostgreSQL 15.4",
-                "uptime": "99.98%"
-            },
-            {
-                "type": "RDS Replica",
-                "id": "ibhar-prod-postgres-ro",
-                "name": "IBHAR Telemetry Read-Replica",
-                "region": "ap-south-1b",
-                "state": "available",
-                "state_color": "green",
-                "details": "db.m6g.large | PostgreSQL 15.4",
-                "uptime": "99.99%"
-            },
-            {
                 "type": "EC2 Instance",
                 "id": "i-09f8e7d6c5b4a3210",
-                "name": "ibhar-api-gateway-node-01",
+                "name": "ibhar-web-api-node-01",
                 "region": "ap-south-1a",
                 "state": "running",
                 "state_color": "green",
                 "details": "t4g.xlarge | 10.142.0.12",
-                "uptime": "42 days"
+                "uptime": "Active"
             },
             {
                 "type": "EC2 Instance",
                 "id": "i-01a2b3c4d5e6f7890",
-                "name": "ibhar-api-gateway-node-02",
+                "name": "ibhar-sync-engine-node-02",
                 "region": "ap-south-1b",
                 "state": "running",
                 "state_color": "green",
                 "details": "t4g.xlarge | 10.142.0.18",
-                "uptime": "42 days"
+                "uptime": "Active"
+            },
+            {
+                "type": "EC2 Instance",
+                "id": "i-04c5d6e7f8a9b0123",
+                "name": "ibhar-db-compute-node-03",
+                "region": "ap-south-1a",
+                "state": "running",
+                "state_color": "green",
+                "details": "t4g.2xlarge | 10.142.0.25",
+                "uptime": "Active"
             },
             {
                 "type": "Lambda Function",
@@ -331,76 +333,42 @@ class MockCostProvider(CostProvider):
 
     def get_integration_health(self) -> Dict[str, Any]:
         """
-        Derives hospital database integration health based on RDS CloudWatch telemetry.
+        Derives compute infrastructure health based on EC2 fleet status.
         """
-        rng = random.Random(int(timezone.now().timestamp()) // 300 + self.seed)
-        cpu = round(rng.uniform(22.0, 38.5), 1)
-        connections = rng.randint(45, 68)
-        free_storage_gb = round(rng.uniform(115.0, 132.0), 1)
-        read_latency_ms = round(rng.uniform(1.2, 3.4), 2)
-        write_latency_ms = round(rng.uniform(2.1, 5.8), 2)
-
-        # Status rules: healthy unless CPU > 85% or storage < 10GB
-        status = "healthy"
-        if cpu > 80 or free_storage_gb < 15:
-            status = "degraded"
-        if cpu > 95 or free_storage_gb < 5:
-            status = "down"
-
         return {
-            "status": status,
-            "status_label": status.upper(),
-            "rds_instance_id": "ibhar-prod-postgres-db",
-            "engine": "PostgreSQL 15.4-R2",
+            "status": "healthy",
+            "status_label": "HEALTHY",
+            "fleet_type": "EC2 Compute Fleet",
+            "region": "ap-south-1",
             "metrics": {
-                "cpu_utilization": {
-                    "value": cpu,
-                    "unit": "Percent",
-                    "status": "normal" if cpu < 70 else "warning"
-                },
-                "database_connections": {
-                    "value": connections,
-                    "unit": "Count",
-                    "status": "normal" if connections < 100 else "warning"
-                },
-                "free_storage_space_gb": {
-                    "value": free_storage_gb,
-                    "unit": "Gigabytes",
-                    "status": "normal" if free_storage_gb > 20 else "warning"
-                },
-                "read_latency_ms": {
-                    "value": read_latency_ms,
-                    "unit": "Milliseconds",
-                    "status": "normal"
-                },
-                "write_latency_ms": {
-                    "value": write_latency_ms,
-                    "unit": "Milliseconds",
-                    "status": "normal"
-                }
+                "total_instances": {"value": 3, "unit": "Count", "status": "normal"},
+                "running_instances": {"value": 3, "unit": "Count", "status": "normal"},
+                "health_rate": {"value": "100%", "unit": "Percent", "status": "normal"},
             },
             "last_checked": timezone.now().strftime("%Y-%m-%d %H:%M:%S UTC")
         }
 
     def get_summary(self) -> Dict[str, Any]:
         """
-        Summarizes key financial and operational metrics for quick dashboard rendering.
+        Summarizes key financial and operational metrics without making hourly CE calls.
+        Hourly burn is derived as an estimate from today's accrued spend.
         """
-        hourly = self.get_hourly_cost()
         daily = self.get_daily_cost()
         by_service = self.get_cost_by_service()
         forecast = self.get_forecast()
         health = self.get_integration_health()
         resources = self.get_running_resources()
 
-        # Current hour cost
-        latest_hour = hourly["ResultsByTime"][-1] if hourly.get("ResultsByTime") else {}
-        current_hourly_cost = float(latest_hour.get("Total", {}).get("UnblendedCost", {}).get("Amount", 0.0))
+        # Today's cost
+        now = timezone.now()
+        today_str = now.strftime("%Y-%m-%d")
+        all_daily = daily.get("ResultsByTime", [])
+        today_entry = next((d for d in all_daily if d["TimePeriod"]["Start"] == today_str), None)
+        today_cost = float(today_entry["Total"]["UnblendedCost"]["Amount"]) if today_entry else 68.40
 
-        # Today's cost (sum of hours today)
-        today_str = timezone.now().strftime("%Y-%m-%d")
-        today_entry = next((d for d in daily.get("ResultsByTime", []) if d["TimePeriod"]["Start"] == today_str), None)
-        today_cost = float(today_entry["Total"]["UnblendedCost"]["Amount"]) if today_entry else (current_hourly_cost * 18.0)
+        # Estimated hourly rate (today_cost / elapsed hours)
+        hours_elapsed = max(1.0, now.hour + (now.minute / 60.0))
+        current_hourly_cost = round(today_cost / hours_elapsed, 2)
 
         # Top 3 services
         top_services = by_service.get("services", [])[:3]
@@ -410,6 +378,7 @@ class MockCostProvider(CostProvider):
             "is_mock": True,
             "currency": "USD",
             "current_hourly_rate": round(current_hourly_cost, 2),
+            "current_hourly_rate_is_estimate": True,
             "today_cost": round(today_cost, 2),
             "mtd_cost": float(forecast["Budget"]["ActualSpend"]["Amount"]),
             "forecast_cost": float(forecast["Total"]["Amount"]),
@@ -420,5 +389,5 @@ class MockCostProvider(CostProvider):
             "running_resources_count": len(resources),
             "integration_health": health["status"],
             "integration_health_details": health,
-            "last_updated": timezone.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+            "last_updated": now.strftime("%Y-%m-%d %H:%M:%S UTC")
         }

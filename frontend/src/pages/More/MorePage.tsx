@@ -16,7 +16,7 @@ export const MorePage: React.FC = () => {
     {
       title: 'SYSTEM CONFIGURATION',
       items: [
-        { name: 'AWS Cost & Infrastructure Telemetry', path: '/aws-costs', icon: Coins, desc: 'Hourly burn rates, service expenditures, running EC2/RDS/Lambda & DB health' },
+        { name: 'AWS Cost & Infrastructure Telemetry', path: '/aws-costs', icon: Coins, desc: 'Hourly burn rates, service expenditures, running EC2/Lambda & compute health' },
         { name: 'Notification & Escalation Settings', path: '/notification-settings', icon: Bell, desc: 'SMS, WhatsApp, Email & Slack alert triggers' },
         { name: 'Refresh Settings', path: '/refresh-settings', icon: RefreshCw, desc: 'Configure dynamic live telemetry sync frequency (5m - 120m)' },
         { name: 'Hospital Refresh Rate', path: '/hospital-refresh-rate', icon: Sparkles, desc: 'Customize healthy, delayed & critical conditional thresholds per hospital' },

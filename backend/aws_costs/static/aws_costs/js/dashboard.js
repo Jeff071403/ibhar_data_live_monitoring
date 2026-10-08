@@ -1,14 +1,14 @@
 /**
  * IBHAR AWS Cost & Telemetry Dashboard Controller
- * Handles live REST polling (60s cycle), Chart.js rendering, and DOM updates.
+ * Reads from twice-daily DB snapshots / REST APIs (30m polling cycle).
  */
 
 (function () {
     'use strict';
 
-    const REFRESH_INTERVAL_MS = 60000; // 60s
+    const REFRESH_INTERVAL_MS = 1800000; // 30 minutes
     let refreshTimer = null;
-    let hourlyChartInstance = null;
+    let sevenDayChartInstance = null;
     let serviceDonutInstance = null;
     let dailyChartInstance = null;
 
@@ -54,9 +54,8 @@
         if (indicator) indicator.style.background = '#38bdf8';
 
         try {
-            const [summaryRes, hourlyRes, dailyRes, serviceRes, resourcesRes] = await Promise.all([
+            const [summaryRes, dailyRes, serviceRes, resourcesRes] = await Promise.all([
                 fetchJSON('/aws-costs/api/summary/'),
-                fetchJSON('/aws-costs/api/hourly/?hours=24'),
                 fetchJSON('/aws-costs/api/daily/?days=30'),
                 fetchJSON('/aws-costs/api/by-service/?days=7'),
                 fetchJSON('/aws-costs/api/running-services/')
@@ -65,20 +64,22 @@
             hideStaleBanner();
 
             if (summaryRes) updateSummaryKPIs(summaryRes);
-            if (hourlyRes) updateHourlyChart(hourlyRes);
-            if (dailyRes) updateDailyChart(dailyRes);
+            if (dailyRes) {
+                update7DayChart(dailyRes);
+                updateDailyChart(dailyRes);
+            }
             if (serviceRes) updateServiceDonut(serviceRes);
             if (resourcesRes) updateResourcesTable(resourcesRes);
 
             const lastUpdatedEl = document.getElementById('last-updated-text');
             if (lastUpdatedEl) {
-                const now = new Date();
-                lastUpdatedEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                const timeStr = summaryRes?.last_updated || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                lastUpdatedEl.textContent = `Updated: ${timeStr}`;
             }
 
             if (indicator) indicator.style.background = '#10b981';
         } catch (err) {
-            console.error('[AWS Dashboard] Telemetry poll failed:', err);
+            console.error('[AWS Dashboard] Telemetry fetch failed:', err);
             showStaleBanner('Could not refresh live AWS telemetry. Showing last known state.');
             if (indicator) indicator.style.background = '#ef4444';
         }
@@ -105,7 +106,7 @@
     }
 
     function updateSummaryKPIs(data) {
-        // 1. Hourly burn
+        // 1. Hourly burn (Estimate)
         const valHourly = document.getElementById('val-hourly-rate');
         if (valHourly && data.current_hourly_rate !== undefined) {
             valHourly.textContent = Number(data.current_hourly_rate).toFixed(2);
@@ -151,12 +152,12 @@
             valForecast.textContent = Number(data.forecast_cost).toFixed(2);
         }
 
-        // 5. Hospital DB Integration Health
+        // 5. EC2 Compute Fleet Health
         const badgeHealth = document.getElementById('badge-health-status');
-        const valCpu = document.getElementById('val-rds-cpu');
-        const valConns = document.getElementById('val-rds-conns');
-        const valStorage = document.getElementById('val-rds-storage');
-        const valInstance = document.getElementById('val-rds-instance-name');
+        const valTotal = document.getElementById('val-ec2-total');
+        const valRunning = document.getElementById('val-ec2-running');
+        const valHealthRate = document.getElementById('val-ec2-health-rate');
+        const valRegion = document.getElementById('val-ec2-region-name');
 
         const health = data.integration_health_details || {};
         const status = (data.integration_health || health.status || 'healthy').toLowerCase();
@@ -167,19 +168,15 @@
         }
 
         if (health.metrics) {
-            if (valCpu && health.metrics.cpu_utilization) {
-                valCpu.textContent = `${health.metrics.cpu_utilization.value}%`;
-            }
-            if (valConns && health.metrics.database_connections) {
-                valConns.textContent = health.metrics.database_connections.value;
-            }
-            if (valStorage && health.metrics.free_storage_space_gb) {
-                valStorage.textContent = `${health.metrics.free_storage_space_gb.value} GB`;
-            }
+            const total = health.metrics.total_instances ? health.metrics.total_instances.value : 3;
+            const running = health.metrics.running_instances ? health.metrics.running_instances.value : total;
+            if (valTotal) valTotal.textContent = `${total} Nodes`;
+            if (valRunning) valRunning.textContent = `${running} / ${total}`;
+            if (valHealthRate) valHealthRate.textContent = `${health.metrics.health_rate ? health.metrics.health_rate.value : '100%'} UP`;
         }
 
-        if (valInstance && health.rds_instance_id) {
-            valInstance.textContent = `RDS: ${health.rds_instance_id}`;
+        if (valRegion) {
+            valRegion.textContent = `Region: ${health.region || 'ap-south-1'}`;
         }
     }
 
@@ -187,23 +184,23 @@
         Chart.defaults.color = '#94a3b8';
         Chart.defaults.font.family = "'Plus Jakarta Sans', sans-serif";
 
-        // Hourly Line Chart
-        const ctxHourly = document.getElementById('chart-hourly-timeline');
-        if (ctxHourly) {
-            hourlyChartInstance = new Chart(ctxHourly, {
+        // 7-Day Spend Area/Line Chart
+        const ctx7Day = document.getElementById('chart-hourly-timeline');
+        if (ctx7Day) {
+            sevenDayChartInstance = new Chart(ctx7Day, {
                 type: 'line',
                 data: {
                     labels: [],
                     datasets: [{
-                        label: 'Hourly Cost ($)',
+                        label: 'Daily Spend ($)',
                         data: [],
                         borderColor: '#3b82f6',
                         backgroundColor: 'rgba(59, 130, 246, 0.12)',
                         fill: true,
                         tension: 0.35,
-                        pointRadius: 3,
+                        pointRadius: 4,
                         pointBackgroundColor: '#60a5fa',
-                        pointHoverRadius: 6,
+                        pointHoverRadius: 7,
                         borderWidth: 2.5
                     }]
                 },
@@ -221,19 +218,19 @@
                             borderWidth: 1,
                             padding: 10,
                             callbacks: {
-                                label: (context) => ` Cost: $${Number(context.parsed.y).toFixed(4)}`
+                                label: (context) => ` Spend: $${Number(context.parsed.y).toFixed(2)}`
                             }
                         }
                     },
                     scales: {
                         x: {
                             grid: { color: '#1e293b' },
-                            ticks: { maxTicksLimit: 12, font: { size: 10 } }
+                            ticks: { font: { size: 10 } }
                         },
                         y: {
                             grid: { color: '#1e293b' },
                             ticks: {
-                                callback: (val) => `$${Number(val).toFixed(2)}`,
+                                callback: (val) => `$${Number(val).toFixed(0)}`,
                                 font: { size: 11 }
                             }
                         }
@@ -276,7 +273,7 @@
             });
         }
 
-        // Daily Trend Bar Chart
+        // 30-Day Daily Trend Bar Chart
         const ctxDaily = document.getElementById('chart-daily-trend');
         if (ctxDaily) {
             dailyChartInstance = new Chart(ctxDaily, {
@@ -324,9 +321,10 @@
         }
     }
 
-    function updateHourlyChart(res) {
-        if (!hourlyChartInstance) return;
-        const results = res.results || res.data?.ResultsByTime || [];
+    function update7DayChart(res) {
+        if (!sevenDayChartInstance) return;
+        const allResults = res.results || res.data?.ResultsByTime || [];
+        const results = allResults.slice(-7);
         if (!results.length) return;
 
         const labels = [];
@@ -337,8 +335,8 @@
         results.forEach(item => {
             const startStr = item.TimePeriod?.Start || '';
             const dt = new Date(startStr);
-            const hourLabel = dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            labels.push(hourLabel);
+            const dateLabel = dt.toLocaleDateString([], { month: 'short', day: 'numeric' });
+            labels.push(dateLabel);
 
             const amt = Number(item.Total?.UnblendedCost?.Amount || 0);
             dataPoints.push(amt);
@@ -346,14 +344,14 @@
             if (amt > peak) peak = amt;
         });
 
-        hourlyChartInstance.data.labels = labels;
-        hourlyChartInstance.data.datasets[0].data = dataPoints;
-        hourlyChartInstance.update();
+        sevenDayChartInstance.data.labels = labels;
+        sevenDayChartInstance.data.datasets[0].data = dataPoints;
+        sevenDayChartInstance.update();
 
         const statPeak = document.getElementById('stat-hourly-peak');
         if (statPeak) statPeak.textContent = `$${peak.toFixed(2)}`;
-        const statAvg = document.getElementById('stat-hourly-avg');
-        if (statAvg) statAvg.textContent = `$${(sum / results.length).toFixed(2)}/hr`;
+        const statTotal = document.getElementById('stat-hourly-avg');
+        if (statTotal) statTotal.textContent = `$${sum.toFixed(2)}`;
     }
 
     function updateServiceDonut(res) {

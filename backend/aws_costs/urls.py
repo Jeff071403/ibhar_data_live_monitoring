@@ -8,6 +8,7 @@ from .views import (
     running_services_view,
     integration_health_view,
     summary_view,
+    force_refresh_view,
 )
 
 app_name = 'aws_costs'
@@ -24,4 +25,5 @@ urlpatterns = [
     path('api/running-services/', running_services_view, name='api-running-services'),
     path('api/integration-health/', integration_health_view, name='api-integration-health'),
     path('api/summary/', summary_view, name='api-summary'),
+    path('api/refresh/', force_refresh_view, name='api-refresh'),
 ]

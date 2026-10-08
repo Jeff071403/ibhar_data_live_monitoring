@@ -5,10 +5,10 @@
 <div class="dashboard-wrapper">
     <!-- Top KPI Row -->
     <section class="kpi-grid">
-        <!-- KPI 1: Hourly Burn -->
+        <!-- KPI 1: Hourly Burn (Estimate) -->
         <div class="kpi-card" id="kpi-hourly">
             <div class="kpi-header">
-                <span class="kpi-label">HOURLY BURN RATE</span>
+                <span class="kpi-label">HOURLY BURN (EST.)</span>
                 <span class="kpi-icon-wrap bg-blue-500/10 text-blue-400">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 </span>
@@ -73,42 +73,42 @@
             <p class="kpi-subtext" id="val-forecast-delta">Cost Explorer ML Forecast</p>
         </div>
 
-        <!-- KPI 5: Hospital DB Integration Health -->
+        <!-- KPI 5: EC2 Compute Fleet Health -->
         <div class="kpi-card kpi-card-highlight" id="kpi-health">
             <div class="kpi-header">
-                <span class="kpi-label">HOSPITAL DB HEALTH</span>
+                <span class="kpi-label">EC2 COMPUTE FLEET</span>
                 <span class="health-status-badge badge-healthy" id="badge-health-status">HEALTHY</span>
             </div>
             <div class="health-metrics-grid">
                 <div class="health-metric-item">
-                    <span class="health-metric-label">RDS CPU</span>
-                    <span class="health-metric-val" id="val-rds-cpu">--%</span>
+                    <span class="health-metric-label">FLEET SIZE</span>
+                    <span class="health-metric-val" id="val-ec2-total">3 Nodes</span>
                 </div>
                 <div class="health-metric-item">
-                    <span class="health-metric-label">DB CONNS</span>
-                    <span class="health-metric-val" id="val-rds-conns">--</span>
+                    <span class="health-metric-label">RUNNING</span>
+                    <span class="health-metric-val" id="val-ec2-running">3 / 3</span>
                 </div>
                 <div class="health-metric-item">
-                    <span class="health-metric-label">FREE STORAGE</span>
-                    <span class="health-metric-val" id="val-rds-storage">-- GB</span>
+                    <span class="health-metric-label">STATUS</span>
+                    <span class="health-metric-val" id="val-ec2-health-rate">100% UP</span>
                 </div>
             </div>
-            <p class="kpi-subtext" id="val-rds-instance-name">Instance: PostgreSQL Primary</p>
+            <p class="kpi-subtext" id="val-ec2-region-name">Region: ap-south-1</p>
         </div>
     </section>
 
     <!-- Charts Row -->
     <section class="charts-grid">
-        <!-- 24h Hourly Cost Timeline -->
+        <!-- 7-Day Daily Spend Trend -->
         <div class="chart-card chart-card-wide">
             <div class="chart-header">
                 <div>
-                    <h2 class="chart-title">Hourly Cost Timeline (Last 24 Hours)</h2>
-                    <p class="chart-subtitle">Real-time hourly spend distribution across active telemetry services</p>
+                    <h2 class="chart-title">Last 7 Days Daily Spend</h2>
+                    <p class="chart-subtitle">Recent daily spend trajectory from daily Cost Explorer telemetry</p>
                 </div>
                 <div class="chart-legend-custom" id="hourly-legend-stats">
                     <span class="stat-pill">Peak: <strong id="stat-hourly-peak">$--</strong></span>
-                    <span class="stat-pill">Avg: <strong id="stat-hourly-avg">$--/hr</strong></span>
+                    <span class="stat-pill">7-Day Total: <strong id="stat-hourly-avg">$--</strong></span>
                 </div>
             </div>
             <div class="chart-canvas-container">

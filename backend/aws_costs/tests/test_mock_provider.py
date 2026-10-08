@@ -55,11 +55,10 @@ class MockCostProviderTests(TestCase):
     def test_running_resources(self):
         resources = self.provider.get_running_resources()
         self.assertIsInstance(resources, list)
-        self.assertTrue(len(resources) >= 4)
+        self.assertTrue(len(resources) >= 3)
         
         types = [r["type"] for r in resources]
         self.assertTrue(any("EC2" in t for t in types))
-        self.assertTrue(any("RDS" in t for t in types))
         self.assertTrue(any("Lambda" in t for t in types))
 
     def test_integration_health(self):
@@ -67,9 +66,8 @@ class MockCostProviderTests(TestCase):
         self.assertIn("status", health)
         self.assertIn(health["status"], ["healthy", "degraded", "down"])
         self.assertIn("metrics", health)
-        self.assertIn("cpu_utilization", health["metrics"])
-        self.assertIn("database_connections", health["metrics"])
-        self.assertIn("free_storage_space_gb", health["metrics"])
+        self.assertIn("total_instances", health["metrics"])
+        self.assertIn("running_instances", health["metrics"])
 
     def test_summary_kpis(self):
         summary = self.provider.get_summary()

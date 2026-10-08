@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useMonitoring } from '../../hooks/useMonitoring';
+import { getStoredThresholds } from '../../utils/monitoring';
 import { Card } from '../../components/common/Card';
 import { CopyButton } from '../../components/common/CopyButton';
 import {
@@ -92,7 +93,8 @@ export const LivePage: React.FC = () => {
     integrationHealthData,
     lastUpdated,
     manualRefresh,
-    isSimulatingUpdate
+    isSimulatingUpdate,
+    thresholdVersion
   } = useMonitoring();
 
   // Page flipping states (for 4s table records pagination)
@@ -259,17 +261,7 @@ export const LivePage: React.FC = () => {
 
   // Sort and arrange hospitals: Critical first, then Delayed, then Receiving
   const sortedHospitals = useMemo(() => {
-    // Read dynamic per-hospital threshold overrides configured in Hospital Refresh Rate settings
-    let customThresholds: Record<string, { receivingMaxMinutes: number; delayedMaxMinutes: number }> = {};
-    let globalThresh = { receivingMaxMinutes: 30, delayedMaxMinutes: 61 };
-    try {
-      const savedCustom = localStorage.getItem('ibhar_hospital_thresholds');
-      if (savedCustom) customThresholds = JSON.parse(savedCustom);
-      const savedGlobal = localStorage.getItem('ibhar_global_threshold');
-      if (savedGlobal) globalThresh = JSON.parse(savedGlobal);
-    } catch {
-      // Use defaults if unavailable
-    }
+    const { customThresholds, globalThresh } = getStoredThresholds();
 
     const enriched = logs.map(log => {
       const delay = computeDelayMinutes(log.received_at || log.start_time, log.delay_minutes);
@@ -309,7 +301,7 @@ export const LivePage: React.FC = () => {
       }
       return (b.calculatedDelay || 0) - (a.calculatedDelay || 0);
     });
-  }, [logs, searchQuery, selectedStatusFilter]);
+  }, [logs, searchQuery, selectedStatusFilter, thresholdVersion]);
 
   const totalPages = Math.max(1, Math.ceil(sortedHospitals.length / ITEMS_PER_PAGE));
 
@@ -377,6 +369,7 @@ export const LivePage: React.FC = () => {
   const delayedCount = useMemo(() => sortedHospitals.filter(h => h.computedStatus.label === 'DELAYED').length, [sortedHospitals]);
   const receivingCount = useMemo(() => sortedHospitals.filter(h => h.computedStatus.label === 'RECEIVING').length, [sortedHospitals]);
   const totalRowsIngested = useMemo(() => sortedHospitals.reduce((acc, h) => acc + (h.record_count ?? h.records_processed ?? 0), 0), [sortedHospitals]);
+  const activeGlobalThresh = useMemo(() => getStoredThresholds().globalThresh, [thresholdVersion]);
 
   return (
     <motion.div
@@ -480,7 +473,7 @@ export const LivePage: React.FC = () => {
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs sm:text-sm font-black uppercase text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
-              Critical (&gt;61m)
+              Critical (&gt;{activeGlobalThresh.delayedMaxMinutes}m)
             </span>
             <ShieldAlert className="w-5 h-5 text-rose-600 dark:text-rose-400" />
           </div>
@@ -504,7 +497,7 @@ export const LivePage: React.FC = () => {
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs sm:text-sm font-black uppercase text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-              Delayed (31-61m)
+              Delayed ({activeGlobalThresh.receivingMaxMinutes + 1}–{activeGlobalThresh.delayedMaxMinutes}m)
             </span>
             <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400" />
           </div>
@@ -528,7 +521,7 @@ export const LivePage: React.FC = () => {
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs sm:text-sm font-black uppercase text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-              Receiving (≤30m)
+              Receiving (≤{activeGlobalThresh.receivingMaxMinutes}m)
             </span>
             <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
           </div>
@@ -973,13 +966,13 @@ export const LivePage: React.FC = () => {
           </div>
           <div className="flex items-center gap-4 text-xs font-black">
             <span className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" /> &gt;61m: Critical
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" /> &gt;{activeGlobalThresh.delayedMaxMinutes}m: Critical
             </span>
             <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> 31-61m: Delayed
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> {activeGlobalThresh.receivingMaxMinutes + 1}–{activeGlobalThresh.delayedMaxMinutes}m: Delayed
             </span>
             <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> ≤30m: Receiving
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> ≤{activeGlobalThresh.receivingMaxMinutes}m: Receiving
             </span>
           </div>
         </div>
