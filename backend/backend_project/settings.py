@@ -156,7 +156,7 @@ LIVE_SYNC_HOSPITAL_CODES = [c.strip() for c in os.getenv('LIVE_SYNC_HOSPITAL_COD
 LIVE_SYNC_EXPECTED_INTERVAL_MINUTES = int(os.getenv('LIVE_SYNC_EXPECTED_INTERVAL_MINUTES', '30'))
 
 # AWS Cost & Usage Dashboard Settings
-AWS_COST_MODE = os.getenv('AWS_COST_MODE', 'mock')
+AWS_COST_MODE = os.getenv('AWS_COST_MODE', 'real' if os.getenv('AWS_ACCESS_KEY_ID') else 'mock')
 AWS_REGION = os.getenv('AWS_REGION', 'ap-south-1')
 AWS_COST_CACHE_TTL_HOURLY = int(os.getenv('AWS_COST_CACHE_TTL_HOURLY', '900'))
 AWS_COST_CACHE_TTL_DAILY = int(os.getenv('AWS_COST_CACHE_TTL_DAILY', '21600'))
