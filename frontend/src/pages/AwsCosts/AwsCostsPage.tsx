@@ -199,6 +199,12 @@ export const AwsCostsPage: React.FC = () => {
 
   const total7Days = last7DaysChartPoints.reduce((sum, cur) => sum + cur.spend, 0);
   const peak7Days = last7DaysChartPoints.reduce((max, cur) => (cur.spend > max ? cur.spend : max), 0);
+  const nonZeroDays = last7DaysChartPoints.filter(p => p.spend > 0);
+  const lowest7Days = nonZeroDays.length > 0 ? Math.min(...nonZeroDays.map(p => p.spend)) : (last7DaysChartPoints.length > 0 ? Math.min(...last7DaysChartPoints.map(p => p.spend)) : 0);
+  const avgDaily7Days = last7DaysChartPoints.length > 0 ? total7Days / last7DaysChartPoints.length : 0;
+
+  const activeServices = serviceData.filter((srv: any) => Number(srv.amount) > 0);
+  const displayServices = activeServices.length > 0 ? activeServices : serviceData.slice(0, 7);
 
   // 2. 30-Day Daily total sum & Rank-based 4-Tier color mapping
   const total30Days = dailyData.reduce((sum: number, cur: any) => sum + Number(cur.Total?.UnblendedCost?.Amount || 0), 0);
@@ -490,115 +496,144 @@ export const AwsCostsPage: React.FC = () => {
       {/* Main Charts Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Last 7 Days Daily Spend (2 Cols) - Area Chart */}
-        <div className="md:col-span-2 bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <div>
-              <h2 className="text-base font-extrabold text-slate-900 dark:text-white">
-                Last 7 Days Daily Spend
-              </h2>
-              <p className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                Recent daily spend trajectory from daily Cost Explorer telemetry
-              </p>
+        <div className="md:col-span-2 bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+          <div className="flex-1 flex flex-col">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <h2 className="text-base font-extrabold text-slate-900 dark:text-white">
+                  Last 7 Days Daily Spend
+                </h2>
+                <p className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                  Recent daily spend trajectory from daily Cost Explorer telemetry
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 rounded-lg text-xs font-extrabold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                  Peak: <strong className="font-mono text-blue-600 dark:text-blue-400">${peak7Days.toFixed(2)}</strong>
+                </span>
+                <span className="px-2.5 py-1 rounded-lg text-xs font-extrabold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                  7-Day Total: <strong className="font-mono">${total7Days.toFixed(2)}</strong>
+                </span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-1 rounded-lg text-xs font-extrabold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                Peak: <strong className="font-mono text-blue-600 dark:text-blue-400">${peak7Days.toFixed(2)}</strong>
-              </span>
-              <span className="px-2.5 py-1 rounded-lg text-xs font-extrabold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                7-Day Total: <strong className="font-mono">${total7Days.toFixed(2)}</strong>
-              </span>
+
+            {/* Recharts Area Chart */}
+            <div className="flex-1 min-h-[220px] w-full pt-2 pb-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={last7DaysChartPoints} margin={{ top: 10, right: 15, left: -10, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="sevenDaySpendGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.45} />
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.35} vertical={false} />
+                  <XAxis
+                    dataKey="date"
+                    stroke="#64748b"
+                    tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 700 }}
+                    axisLine={{ stroke: '#334155' }}
+                    tickLine={{ stroke: '#334155' }}
+                  />
+                  <YAxis
+                    stroke="#64748b"
+                    tickFormatter={(val) => `$${Number(val).toFixed(0)}`}
+                    tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}
+                    axisLine={{ stroke: '#334155' }}
+                    tickLine={{ stroke: '#334155' }}
+                    domain={[0, (dataMax: number) => Math.ceil((dataMax * 1.15) / 10) * 10 || 100]}
+                  />
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        return (
+                          <div className="bg-slate-900/95 backdrop-blur-md text-white p-2.5 rounded-xl shadow-2xl text-xs font-mono border border-slate-700 pointer-events-none">
+                            <div className="text-slate-400 text-[10px] font-bold border-b border-slate-800 pb-1 mb-1">
+                              {data.fullDate || data.date}
+                            </div>
+                            <div className="text-blue-400 font-black text-sm">
+                              Daily Spend: ${Number(data.spend).toFixed(2)}
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="spend"
+                    stroke="#3b82f6"
+                    strokeWidth={3}
+                    fillOpacity={1}
+                    fill="url(#sevenDaySpendGradient)"
+                    dot={{ r: 4, fill: '#60a5fa', stroke: '#1d4ed8', strokeWidth: 1.5 }}
+                    activeDot={{ r: 7, fill: '#93c5fd', stroke: '#1e40af', strokeWidth: 2 }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
             </div>
           </div>
 
-          {/* Recharts Area Chart */}
-          <div className="h-64 w-full pt-3 pb-1">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={last7DaysChartPoints} margin={{ top: 10, right: 15, left: -10, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="sevenDaySpendGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.45} />
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.35} vertical={false} />
-                <XAxis
-                  dataKey="date"
-                  stroke="#64748b"
-                  tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 700 }}
-                  axisLine={{ stroke: '#334155' }}
-                  tickLine={{ stroke: '#334155' }}
-                />
-                <YAxis
-                  stroke="#64748b"
-                  tickFormatter={(val) => `$${Number(val).toFixed(0)}`}
-                  tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}
-                  axisLine={{ stroke: '#334155' }}
-                  tickLine={{ stroke: '#334155' }}
-                  domain={[0, (dataMax: number) => Math.ceil((dataMax * 1.15) / 10) * 10 || 100]}
-                />
-                <Tooltip
-                  content={({ active, payload }) => {
-                    if (active && payload && payload.length) {
-                      const data = payload[0].payload;
-                      return (
-                        <div className="bg-slate-900/95 backdrop-blur-md text-white p-2.5 rounded-xl shadow-2xl text-xs font-mono border border-slate-700 pointer-events-none">
-                          <div className="text-slate-400 text-[10px] font-bold border-b border-slate-800 pb-1 mb-1">
-                            {data.fullDate || data.date}
-                          </div>
-                          <div className="text-blue-400 font-black text-sm">
-                            Daily Spend: ${Number(data.spend).toFixed(2)}
-                          </div>
-                        </div>
-                      );
-                    }
-                    return null;
-                  }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="spend"
-                  stroke="#3b82f6"
-                  strokeWidth={3}
-                  fillOpacity={1}
-                  fill="url(#sevenDaySpendGradient)"
-                  dot={{ r: 4, fill: '#60a5fa', stroke: '#1d4ed8', strokeWidth: 1.5 }}
-                  activeDot={{ r: 7, fill: '#93c5fd', stroke: '#1e40af', strokeWidth: 2 }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+          {/* 7-Day Quick Metric Footer Bar */}
+          <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800/80 grid grid-cols-3 gap-2 text-center">
+            <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50">
+              <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Average / Day</span>
+              <span className="text-xs font-black font-mono text-slate-800 dark:text-slate-200">${avgDaily7Days.toFixed(2)}</span>
+            </div>
+            <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50">
+              <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Lowest Day</span>
+              <span className="text-xs font-black font-mono text-emerald-600 dark:text-emerald-400">${lowest7Days.toFixed(2)}</span>
+            </div>
+            <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/50">
+              <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active Services</span>
+              <span className="text-xs font-black font-mono text-indigo-600 dark:text-indigo-400">{activeServices.length || serviceData.length}</span>
+            </div>
           </div>
         </div>
 
         {/* Cost by AWS Service (1 Col) */}
         <div className="bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
           <div>
-            <h2 className="text-base font-extrabold text-slate-900 dark:text-white mb-0.5">
-              Cost by AWS Service (7 Days)
-            </h2>
-            <p className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-4">
-              Top infrastructure cost breakdown
+            <div className="flex items-center justify-between mb-0.5">
+              <h2 className="text-base font-extrabold text-slate-900 dark:text-white">
+                Cost by AWS Service
+              </h2>
+              <span className="text-[11px] font-extrabold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                7 Days
+              </span>
+            </div>
+            <p className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-3">
+              Active infrastructure spenders ({displayServices.length})
             </p>
 
-            <div className="space-y-2.5">
-              {serviceData.map((srv: any, idx: number) => (
+            <div className="space-y-2">
+              {displayServices.map((srv: any, idx: number) => (
                 <div key={idx} className="space-y-1">
-                  <div className="flex items-center justify-between text-xs font-bold">
-                    <span className="text-slate-700 dark:text-slate-300 truncate max-w-[180px]">
+                  <div className="flex items-center justify-between text-xs font-bold gap-2">
+                    <span className="text-slate-700 dark:text-slate-300 truncate" title={srv.service}>
                       {srv.service.replace('Amazon ', '').replace('AWS ', '')}
                     </span>
-                    <span className="font-mono font-extrabold text-slate-900 dark:text-white">
-                      ${Number(srv.amount).toFixed(2)}
-                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 font-mono">
+                        {srv.percentage}%
+                      </span>
+                      <span className="font-mono font-extrabold text-slate-900 dark:text-white min-w-[52px] text-right">
+                        ${Number(srv.amount).toFixed(2)}
+                      </span>
+                    </div>
                   </div>
-                  <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                  <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
                     <div
                       className={`h-full rounded-full ${
                         idx === 0 ? 'bg-blue-500' :
                         idx === 1 ? 'bg-indigo-500' :
                         idx === 2 ? 'bg-emerald-500' :
-                        idx === 3 ? 'bg-amber-500' : 'bg-purple-500'
+                        idx === 3 ? 'bg-amber-500' :
+                        idx === 4 ? 'bg-rose-500' : 'bg-purple-500'
                       }`}
-                      style={{ width: `${srv.percentage}%` }}
+                      style={{ width: `${Math.max(2, srv.percentage)}%` }}
                     />
                   </div>
                 </div>

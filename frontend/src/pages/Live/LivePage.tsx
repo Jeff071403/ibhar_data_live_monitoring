@@ -393,7 +393,7 @@ export const LivePage: React.FC = () => {
             </span>
           </div>
 
-          <h1 className="font-heading font-black text-2xl sm:text-3xl md:text-4xl text-slate-900 dark:text-white tracking-tight flex items-center gap-3">
+          <h1 className="font-heading font-black text-2xl sm:text-3xl md:text-4xl text-slate-900 dark:text-white tracking-wide [word-spacing:0.35rem] flex items-center gap-3">
             LIVE HOSPITAL TELEMETRY STREAM
             <TrendingUp className="w-8 h-8 text-blue-600 dark:text-blue-400" />
           </h1>
